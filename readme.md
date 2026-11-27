@@ -254,7 +254,7 @@ use `j` / `k` or the arrow keys to preview palettes. press `enter` to keep a the
 
 ## models
 
-the model picker includes 33 pre-converted GGML models from the [whisper.cpp model collection](https://huggingface.co/ggerganov/whisper.cpp), including quantized q5 and q8 variants and English-only models.
+the model picker includes 37 pre-converted GGML models from the [whisper.cpp model collection](https://huggingface.co/ggerganov/whisper.cpp), including quantized q5 and q8 variants and English-only models.
 
 | model family | download size | approximate RAM | profile |
 |:--|--:|--:|:--|
