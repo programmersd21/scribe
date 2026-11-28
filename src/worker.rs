@@ -222,13 +222,13 @@ fn run(
     reap(children);
     let last = match result {
         Err(_) => EventKind::Error("the worker panicked. the job was abandoned; try again".into()),
-        Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e == "cancelled" => EventKind::Cancelled,
         Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e.starts_with("cancelled; ") => {
             EventKind::CancelledWithWarning(e["cancelled; ".len()..].to_string())
         }
-        Ok(_) if cancel.load(Ordering::Relaxed) => EventKind::Cancelled,
-        Ok(Ok(())) => EventKind::Done,
+        Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e == "cancelled" => EventKind::Cancelled,
         Ok(Err(e)) => EventKind::Error(e),
+        Ok(Ok(())) if cancel.load(Ordering::Relaxed) => EventKind::Cancelled,
+        Ok(Ok(())) => EventKind::Done,
     };
     let _ = tx.send(Event::new(job_id, last));
 }
