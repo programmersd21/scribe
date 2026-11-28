@@ -100,17 +100,7 @@ fn valid_ipvfuture(host: &str) -> bool {
         && !address.is_empty()
         && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
-                || b"-._~!    !version.is_empty()
-        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
-        && !address.is_empty()
-        && address.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || b"-._~!        && address.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || b"-._~!$&()*+,;=:".contains(&byte)
-                || byte == 39
-        })()*+,;=:".contains(&byte) || byte == 39
-        })()*+,;=:".contains(&byte)
-                || byte == b'\''
+                || b"-._~!$&'()*+,;=:".contains(&byte)
         })
 }
 
