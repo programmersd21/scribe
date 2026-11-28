@@ -888,6 +888,29 @@ fn change_setting(app: &mut App, forward: bool) {
 fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
+            if app.download_discard {
+                let result = app
+                    .download_models
+                    .iter()
+                    .find(|model| model.file == app.download_file)
+                    .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
+                    .and_then(model::remove_model);
+                app.download_discard = false;
+                app.download_paused = false;
+                match result {
+                    Ok(()) => {
+                        app.download = app::DownloadState::Idle;
+                        app.download_info = "download canceled · completed file removed".into();
+                        app.toast("download canceled", ToastKind::Warn);
+                    }
+                    Err(err) => {
+                        app.download = app::DownloadState::Failed;
+                        app.download_info = err.clone();
+                        app.set_message(err);
+                    }
+                }
+                return;
+            }
             app.download = app::DownloadState::Done;
             app.download_paused = false;
             app.download_frac = 1.0;
