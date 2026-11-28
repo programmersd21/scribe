@@ -62,21 +62,27 @@ impl Preferences {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
             };
-            let value = unescape(value.trim());
+            let value = unescape(value);
             match key.trim() {
-                "model" if !value.is_empty() => prefs.model = Some(value),
+                "model" if !value.trim().is_empty() => {
+                    prefs.model = Some(value.trim().to_string())
+                }
                 "threads" => {
-                    if let Ok(n) = value.parse::<i32>()
+                    if let Ok(n) = value.trim().parse::<i32>()
                         && (1..=256).contains(&n)
                     {
                         prefs.threads = Some(n);
                     }
                 }
-                "lang" if !value.is_empty() => prefs.lang = Some(value),
+                "lang" if !value.trim().is_empty() => {
+                    prefs.lang = Some(value.trim().to_string())
+                }
                 "out" if !value.is_empty() => prefs.out = Some(value),
                 "format" => prefs.format = Format::parse(&value),
-                "theme" if !value.is_empty() => prefs.theme = Some(value),
-                "translate" => prefs.translate = value.parse::<bool>().ok(),
+                "theme" if !value.trim().is_empty() => {
+                    prefs.theme = Some(value.trim().to_string())
+                }
+                "translate" => prefs.translate = value.trim().parse::<bool>().ok(),
                 _ => {}
             }
         }
@@ -264,6 +270,19 @@ mod tests {
         assert_eq!(Preferences::load_from(&path), prefs);
         // no stray temp files are left behind
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn output_paths_preserve_leading_and_trailing_spaces() {
+        let dir = temp_dir("spaces");
+        let path = dir.join("config");
+        let prefs = Preferences {
+            out: Some(" /tmp/notes with spaces ".into()),
+            ..Preferences::default()
+        };
+        prefs.save_to(&path).unwrap();
+        assert_eq!(Preferences::load_from(&path), prefs);
         fs::remove_dir_all(&dir).unwrap();
     }
 
