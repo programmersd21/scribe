@@ -462,6 +462,22 @@ impl Drop for Ingest {
     }
 }
 
+fn send_chunk(tx: &SyncSender<Chunk>, mut chunk: Chunk, cancel: &AtomicBool) -> bool {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+        match tx.try_send(chunk) {
+            Ok(()) => return true,
+            Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                chunk = returned;
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
+        }
+    }
+}
+
 fn spawn_ingest(
     mut out: ChildStdout,
     err: ChildStderr,
@@ -490,15 +506,18 @@ fn spawn_ingest(
                     Ok(n) => n,
                     Err(e) => {
                         if !cancel.load(Ordering::Relaxed) {
-                            let _ = tx
-                                .send(Chunk::Failed(format!("could not read decoded audio: {e}")));
+                            let _ = send_chunk(
+                                &tx,
+                                Chunk::Failed(format!("could not read decoded audio: {e}")),
+                                &cancel,
+                            );
                         }
                         return total;
                     }
                 };
                 let samples = bytes_to_f32(&bytes[..n - n % 4]);
                 total += samples.len();
-                if tx.send(Chunk::Samples(samples)).is_err() {
+                if !send_chunk(&tx, Chunk::Samples(samples), &cancel) {
                     return total;
                 }
                 if n < bytes.len() {
@@ -981,6 +1000,26 @@ mod tests {
         handle.cancel();
         handle.cancel();
         drop(handle);
+    }
+
+    #[test]
+    fn bounded_ingest_send_observes_cancellation() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        assert!(tx.try_send(Chunk::Samples(vec![0.0])).is_ok());
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            let sent = send_chunk(&tx, Chunk::Samples(vec![1.0]), &worker_cancel);
+            done_tx.send(sent).unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(30));
+        cancel.store(true, Ordering::Relaxed);
+        assert!(!done_rx.recv_timeout(Duration::from_secs(1)).unwrap());
+        worker.join().unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Chunk::Samples(_))));
     }
 
     #[cfg(unix)]
