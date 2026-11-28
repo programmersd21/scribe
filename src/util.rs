@@ -300,11 +300,16 @@ pub fn home_dir() -> Option<PathBuf> {
 
 /// expand `~` ourselves. the shell is not involved when a user pastes a path
 /// into a text box, so somebody has to do it.
+fn tilde_suffix(path: &str, windows: bool) -> Option<&str> {
+    path.strip_prefix("~/")
+        .or_else(|| windows.then(|| path.strip_prefix("~\\")).flatten())
+}
+
 pub fn expand_tilde(path: &str) -> PathBuf {
     if path == "~" {
         return home_dir().unwrap_or_else(|| PathBuf::from("~"));
     }
-    if let Some(rest) = path.strip_prefix("~/")
+    if let Some(rest) = tilde_suffix(path, cfg!(windows))
         && let Some(home) = home_dir()
     {
         return home.join(rest);
@@ -751,6 +756,13 @@ mod tests {
         ];
         assert_eq!(common_prefix(&list), "fooba");
         assert_eq!(common_prefix(&[]), "");
+    }
+
+    #[test]
+    fn tilde_paths_accept_native_windows_separators() {
+        assert_eq!(tilde_suffix("~/Documents", false), Some("Documents"));
+        assert_eq!(tilde_suffix("~\\Documents", true), Some("Documents"));
+        assert_eq!(tilde_suffix("~\\Documents", false), None);
     }
 
     #[test]
