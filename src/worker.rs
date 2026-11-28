@@ -468,12 +468,18 @@ fn spawn_ingest(
     tx: SyncSender<Chunk>,
     cancel: Arc<AtomicBool>,
     children: Children,
-) -> Ingest {
-    let diagnostics = thread::Builder::new()
+) -> Result<Ingest, String> {
+    let diagnostics = match thread::Builder::new()
         .name("scribe-stderr".into())
         .spawn(move || drain_stderr(err))
-        .expect("stderr drainer must start");
-    let reader = thread::Builder::new()
+    {
+        Ok(diagnostics) => diagnostics,
+        Err(e) => {
+            kill_all(&children);
+            return Err(format!("cannot start decoder stderr reader: {e}"));
+        }
+    };
+    let reader = match thread::Builder::new()
         .name("scribe-ingest".into())
         .spawn(move || {
             let mut bytes = vec![0u8; CHUNK * 4];
@@ -500,13 +506,19 @@ fn spawn_ingest(
                 }
             }
             total
-        })
-        .expect("ingest reader must start");
-    Ingest {
+        }) {
+        Ok(reader) => reader,
+        Err(e) => {
+            kill_all(&children);
+            let _ = diagnostics.join();
+            return Err(format!("cannot start decoder audio reader: {e}"));
+        }
+    };
+    Ok(Ingest {
         reader: Some(reader),
         diagnostics: Some(diagnostics),
         children,
-    }
+    })
 }
 
 /// collect the decoder's exit status. a clean eof from stdout is not a clean
@@ -600,7 +612,7 @@ fn pipeline(
 
     let (out, err) = start_decoder(&decoded_source, children)?;
     let (chunk_tx, chunk_rx) = mpsc::sync_channel::<Chunk>(48);
-    let ingest = spawn_ingest(out, err, chunk_tx, cancel.clone(), children.clone());
+    let ingest = spawn_ingest(out, err, chunk_tx, cancel.clone(), children.clone())?;
 
     let _ = tx.send(Event::new(job_id, EventKind::Stage(Stage::Transcribing)));
     // borrow a local String into FullParams instead of leaking it: repeated
@@ -995,7 +1007,8 @@ mod tests {
             chunk_tx,
             Arc::new(AtomicBool::new(false)),
             children.clone(),
-        );
+        )
+        .unwrap();
         let mut samples = 0;
         while let Ok(chunk) = chunk_rx.recv() {
             if let Chunk::Samples(s) = chunk {
@@ -1025,7 +1038,8 @@ mod tests {
             chunk_tx,
             Arc::new(AtomicBool::new(false)),
             children.clone(),
-        );
+        )
+        .unwrap();
         drop(chunk_rx);
         let (total, detail) = ingest.finish();
         assert_eq!(total, 1);
