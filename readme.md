@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2024-cba6f7?style=for-the-badge&logo=rust&logoColor=white&labelColor=313244" alt="rust 2024">
-  <a href="https://github.com/programmersd21/scribe/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/programmersd21/scribe/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=ci" alt="ci status"></a>
+  <a href="https://github.com/programmersd21/scribe/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/programmersd21/scribe/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&labelColor=313244&color=fab387&label=ci" alt="ci status"></a>
   <img src="https://img.shields.io/badge/offline-first-94e2d5?style=for-the-badge&logo=protondrive&logoColor=white&labelColor=313244" alt="offline first">
   <img src="https://img.shields.io/badge/cpu-only-a6e3a1?style=for-the-badge&logo=amd&logoColor=white&labelColor=313244" alt="cpu only">
   <img src="https://img.shields.io/badge/whisper-powered-89b4fa?style=for-the-badge&logo=github&logoColor=white&labelColor=313244" alt="whisper powered">
