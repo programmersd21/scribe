@@ -34,7 +34,7 @@ fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
     }
     for ancestor in cache.ancestors().skip(1) {
         match std::fs::symlink_metadata(ancestor) {
-            Ok(metadata) if metadata.is_dir() => {
+            Ok(metadata) if metadata.is_dir() || ancestor.is_dir() => {
                 return (
                     Verdict::Warn,
                     "will be created on first download; write access not tested",
@@ -346,6 +346,7 @@ mod tests {
     fn cache_status_accepts_missing_parent_trees() {
         let dir = std::env::temp_dir().join(format!("scribe-doctor-nested-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        assert!(!dir.exists());
         let cache = dir.join("one").join("two").join("models");
         assert_eq!(
             cache_status(&cache),
