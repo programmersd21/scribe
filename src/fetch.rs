@@ -227,9 +227,14 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     // the crate may have written to `direct` even when it reported another
     // path; keep only the file we actually return.
     if direct != path {
-        cleanup_paths(&[&direct]).map_err(|error| {
-            format!("audio was downloaded but temporary-file cleanup failed: {error}")
-        })?;
+        if let Err(error) = cleanup_paths(&[&direct]) {
+            let returned_cleanup = cleanup_paths(&[&path]);
+            let detail = match returned_cleanup {
+                Ok(()) => error,
+                Err(returned_error) => format!("{error}; returned audio cleanup also failed: {returned_error}"),
+            };
+            return Err(format!("audio was downloaded but temporary-file cleanup failed: {detail}"));
+        }
     }
 
     Ok(FetchedAudio {
