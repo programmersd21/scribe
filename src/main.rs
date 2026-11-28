@@ -1154,6 +1154,21 @@ mod tests {
     }
 
     #[test]
+    fn cache_removal_retries_transient_lock_contention() {
+        let mut attempts = 0;
+        let result = retry_cache_removal(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err("another scribe is using the model cache".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
     fn cancel_after_download_commit_removes_the_completed_model() {
         let dir = std::env::temp_dir().join(format!("scribe-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
