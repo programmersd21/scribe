@@ -1166,6 +1166,8 @@ use util::{duration_short, human_bytes, timestamp_short};
 mod tests {
     use super::*;
 
+    static TEST_CACHE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn plain_transcription_requires_worker_completion() {
         let segment = || export::Segment::new(0, 100, "hello".into());
@@ -1226,6 +1228,7 @@ mod tests {
 
     #[test]
     fn cancel_after_download_commit_removes_the_completed_model() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("scribe-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1257,6 +1260,7 @@ mod tests {
 
     #[test]
     fn discard_clears_equivalent_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
         let info = crate::model::find("tiny").unwrap();
         let dir =
             std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
@@ -1287,6 +1291,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn discard_clears_case_insensitive_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
         let info = crate::model::find("tiny").unwrap();
         let dir = std::env::temp_dir().join(format!("scribe-case-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1313,6 +1318,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn discard_clears_symlinked_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
         use std::os::unix::fs::symlink;
         let info = crate::model::find("tiny").unwrap();
         let dir =
