@@ -1050,6 +1050,29 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(Chunk::Samples(_))));
     }
 
+    #[test]
+    fn dropping_ingest_unblocks_a_reader_waiting_on_backpressure() {
+        let (tx, _rx) = mpsc::sync_channel(1);
+        tx.try_send(Chunk::Samples(vec![0.0])).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let reader_cancel = cancel.clone();
+        let reader = thread::spawn(move || {
+            let sent = send_chunk(&tx, Chunk::Samples(vec![1.0]), &reader_cancel);
+            assert!(!sent);
+            0
+        });
+        let ingest = Ingest {
+            reader: Some(reader),
+            diagnostics: None,
+            children: Arc::new(Mutex::new(Vec::new())),
+            cancel,
+            finished: false,
+        };
+
+        let dropper = thread::spawn(move || drop(ingest));
+        dropper.join().unwrap();
+    }
+
     #[cfg(unix)]
     fn fake_decoder(script: &str) -> Command {
         let mut command = Command::new("sh");
