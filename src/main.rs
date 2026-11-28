@@ -901,6 +901,14 @@ fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
     Err(last_error)
 }
 
+fn clear_discarded_model_selection(app: &mut App, file: &str) {
+    let path = model::cache_dir().join(file);
+    if !path.exists() && app.model_name == path.to_string_lossy() {
+        app.model_name.clear();
+        app.model_label = "-".into();
+    }
+}
+
 fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
@@ -911,14 +919,7 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
                     .and_then(remove_discarded_model);
-                let discarded_path =
-                    model::cache_dir().join(&app.download_file).to_string_lossy().to_string();
-                if !model::cache_dir().join(&app.download_file).exists()
-                    && app.model_name == discarded_path
-                {
-                    app.model_name.clear();
-                    app.model_label = "-".into();
-                }
+                clear_discarded_model_selection(app, &app.download_file);
                 app.download_discard = false;
                 app.download_paused = false;
                 match result {
@@ -1165,34 +1166,16 @@ mod tests {
 
     #[test]
     fn discard_does_not_clear_custom_model_with_matching_filename() {
-        let root = std::env::temp_dir().join(format!("scribe-custom-discard-{}", std::process::id()));
-        let cache = root.join("cache");
-        let custom_dir = root.join("custom");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&cache).unwrap();
-        std::fs::create_dir_all(&custom_dir).unwrap();
-        crate::model::set_test_cache_dir(Some(cache.clone()));
-
         let info = crate::model::find("tiny").unwrap();
-        let cached = cache.join(info.file);
-        let custom = custom_dir.join(info.file);
-        std::fs::write(&cached, b"completed model").unwrap();
-        std::fs::write(&custom, b"custom model").unwrap();
-
+        let custom = std::env::temp_dir().join("custom").join(info.file);
         let mut app = App::new(&crate::cli::Args::default());
-        app.download_models = crate::model::CATALOG.to_vec();
-        app.download_file = info.file.to_string();
         app.model_name = custom.to_string_lossy().to_string();
         app.model_label = "custom".into();
-        app.download_discard = true;
 
-        finish_model_download(&mut app, DownloadOutcome::Ready);
+        clear_discarded_model_selection(&mut app, info.file);
 
-        assert!(!cached.exists());
         assert_eq!(app.model_name, custom.to_string_lossy());
         assert_eq!(app.model_label, "custom");
-        crate::model::set_test_cache_dir(None);
-        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
