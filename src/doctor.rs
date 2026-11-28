@@ -37,8 +37,10 @@ fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
     if cache.is_dir() {
         return (Verdict::Ok, "directory exists; write access not tested");
     }
-    if std::fs::symlink_metadata(&cache).is_ok() {
-        return (Verdict::Fail, "path exists but is not a usable directory");
+    match std::fs::symlink_metadata(&cache) {
+        Ok(_) => return (Verdict::Fail, "path exists but is not a usable directory"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return (Verdict::Fail, "cannot inspect cache path"),
     }
     for ancestor in cache.ancestors().skip(1) {
         match std::fs::symlink_metadata(ancestor) {
@@ -330,6 +332,21 @@ mod tests {
         assert_eq!(
             cache_status(&cache),
             (Verdict::Fail, "path exists but is not a usable directory")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cache_status_rejects_uninspectable_cache_paths() {
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-uninspectable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let parent = dir.join("not-a-directory");
+        std::fs::write(&parent, b"x").unwrap();
+        let cache = parent.join("models");
+        assert_eq!(
+            cache_status(&cache),
+            (Verdict::Fail, "cannot inspect cache path")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
