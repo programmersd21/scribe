@@ -802,7 +802,8 @@ mod tests {
         let home = PathBuf::from("C:\\Users\\person");
         let expanded = expand_tilde_from("~\\", Some(home), true);
         assert_eq!(expanded.to_string_lossy(), "C:\\Users\\person\\");
-        let (dir, prefix) = split_completion_path(&expanded.to_string_lossy(), true);
+        let expanded_text = expanded.to_string_lossy();
+        let (dir, prefix) = split_completion_path(&expanded_text, true);
         assert_eq!(dir, "C:\\Users\\person\\");
         assert_eq!(prefix, "");
 
