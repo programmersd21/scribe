@@ -99,9 +99,11 @@ fn valid_ipvfuture(host: &str) -> bool {
         && version.bytes().all(|byte| byte.is_ascii_hexdigit())
         && !address.is_empty()
         && address.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || b"-._~!        && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
                 || b"-._~!$&()*+,;=:".contains(&byte)
                 || byte == 39
+        })()*+,;=:".contains(&byte) || byte == 39
         })
 }
 
@@ -1012,7 +1014,11 @@ mod tests {
         std::fs::write(dir.join("recording.wav"), b"x").unwrap();
         let input = format!("{}\\record", dir.display());
         let candidates = complete_path(&input);
-        assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.value.ends_with("recording.wav"))
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
