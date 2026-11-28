@@ -31,7 +31,10 @@ fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
     } else if cache.exists() {
         (Verdict::Fail, "path exists but is not a directory")
     } else if cache.parent().is_some_and(std::path::Path::is_dir) {
-        (Verdict::Warn, "will be created on first download; write access not tested")
+        (
+            Verdict::Warn,
+            "will be created on first download; write access not tested",
+        )
     } else {
         (Verdict::Fail, "parent directory is missing")
     }
@@ -288,7 +291,10 @@ mod tests {
         let cache = dir.join("models");
         assert_eq!(
             cache_status(&cache),
-            (Verdict::Warn, "will be created on first download; write access not tested")
+            (
+                Verdict::Warn,
+                "will be created on first download; write access not tested"
+            )
         );
         std::fs::create_dir_all(&cache).unwrap();
         assert_eq!(
