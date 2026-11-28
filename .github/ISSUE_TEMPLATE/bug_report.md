@@ -1,19 +1,19 @@
 ---
 name: bug report
-about: something broke, and you have the details
+about: report a reproducible problem
 title: ''
 labels: bug
 assignees: ''
 ---
 
-what happened? say it in one sentence.
+what happened?
 
-what did you expect to happen instead?
+what did you expect instead?
 
-how do i reproduce it? a command line, a file, or a url is ideal. if it needs an
-audio file, say what kind and roughly how long.
+how can it be reproduced? include the exact command and a small input example
+when possible. do not upload private recordings or credentials.
 
-paste the exact error text if there is one.
+paste the exact error output:
 
 ```text
 
@@ -22,9 +22,11 @@ paste the exact error text if there is one.
 environment:
 
 - scribe version (`scribe --version`):
-- os and terminal:
-- model (if relevant):
+- operating system and architecture:
+- terminal:
+- model and language:
+- input type and approximate duration:
+- relevant `scribe --doctor` output:
 
-if it is an accuracy complaint rather than a crash, name the model first. nine
-times out of ten the answer is "try large-v3-turbo", but i will read the report
-anyway.
+for transcription-quality reports, include the model name and language, plus a
+short description of what was wrong with the result.
