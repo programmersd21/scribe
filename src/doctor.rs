@@ -25,6 +25,21 @@ struct Row {
     detail: String,
 }
 
+fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
+    if cache.is_dir() {
+        (Verdict::Ok, "directory exists; write access not tested")
+    } else if cache.exists() {
+        (Verdict::Fail, "path exists but is not a directory")
+    } else if cache.parent().is_some_and(std::path::Path::is_dir) {
+        (
+            Verdict::Warn,
+            "will be created on first download; write access not tested",
+        )
+    } else {
+        (Verdict::Fail, "parent directory is missing")
+    }
+}
+
 fn version(binary: &std::path::Path, args: &[&str]) -> Option<String> {
     let output = std::process::Command::new(binary)
         .args(args)
@@ -109,18 +124,11 @@ pub fn run(selected_model: Option<&str>) -> i32 {
     });
 
     let cache = model::cache_dir();
-    let cache_ok = cache
-        .parent()
-        .map(|p| p.is_dir())
-        .unwrap_or_else(|| cache.is_dir());
+    let (cache_verdict, cache_detail) = cache_status(&cache);
     rows.push(Row {
         label: "model cache",
-        verdict: if cache_ok { Verdict::Ok } else { Verdict::Fail },
-        detail: format!(
-            "{} ({})",
-            cache.display(),
-            if cache_ok { "writable" } else { "not writable" }
-        ),
+        verdict: cache_verdict,
+        detail: format!("{} ({cache_detail})", cache.display()),
     });
 
     let chosen = selected_model.map(str::to_string).or_else(|| {
@@ -275,6 +283,40 @@ pub fn run(selected_model: Option<&str>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_status_does_not_claim_unchecked_write_access() {
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("models");
+        assert_eq!(
+            cache_status(&cache),
+            (
+                Verdict::Warn,
+                "will be created on first download; write access not tested"
+            )
+        );
+        std::fs::create_dir_all(&cache).unwrap();
+        assert_eq!(
+            cache_status(&cache),
+            (Verdict::Ok, "directory exists; write access not tested")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cache_status_rejects_a_file_at_the_cache_path() {
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("models");
+        std::fs::write(&cache, b"not a directory").unwrap();
+        assert_eq!(
+            cache_status(&cache),
+            (Verdict::Fail, "path exists but is not a directory")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn verdict_labels_are_short() {

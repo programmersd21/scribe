@@ -1,17 +1,16 @@
 ---
 name: feature request
-about: an idea worth arguing about
+about: propose a focused improvement
 title: ''
 labels: enhancement
 assignees: ''
 ---
 
-what is the actual problem you are trying to solve? not "add feature x" — the
-thing that makes feature x worth writing.
+what problem are you trying to solve?
 
-what would you change?
+what behaviour would you expect from scribe?
 
-what did you try already?
+what alternatives or workarounds have you tried?
 
-anything that would make you reject this idea? if the answer is "it adds a 200
-mb dependency for one flag", say so. i will probably agree.
+are there compatibility, performance, privacy or maintenance trade-offs to
+consider?

@@ -1,29 +1,20 @@
----
-name: pull request
-about: changes for review
-title: ''
-labels: ''
-assignees: ''
----
-
-what does this change, in one sentence?
+what does this change?
 
 why is it needed? link the issue if there is one.
 
-how did you verify it? paste the commands you actually ran, not the ones you
-meant to run.
+how did you verify it? include the commands you actually ran.
 
 ```sh
 
 ```
 
-if this touches the worker, the download path, or the layout, explain the
-trade-off you picked. those are the three places where the obvious fix is
-usually the wrong one.
+if this touches transcription workers, downloads, model caching, exports or
+terminal rendering, explain the relevant failure mode and trade-off.
 
-checklist (delete the ones that do not apply):
+checklist:
 
-- [ ] `cargo test` passes
-- [ ] `cargo clippy --all-targets -- -D warnings` is clean
-- [ ] `cargo fmt --all -- --check` is clean
-- [ ] docs updated if behaviour changed
+- [ ] `cargo fmt --all -- --check` passes
+- [ ] `cargo clippy --locked --all-targets --all-features -- -D warnings` passes
+- [ ] `cargo test --locked --all-targets --all-features` passes
+- [ ] documentation is updated when behaviour changes
+- [ ] no unrelated files or generated artifacts are included
