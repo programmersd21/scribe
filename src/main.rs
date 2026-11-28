@@ -1105,6 +1105,33 @@ mod tests {
     }
 
     #[test]
+    fn cancel_after_download_commit_removes_the_completed_model() {
+        let dir = std::env::temp_dir().join(format!("scribe-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+
+        let info = crate::model::find("tiny").unwrap();
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"completed model").unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.download_models = crate::model::CATALOG.to_vec();
+        app.download_file = info.file.to_string();
+        app.download_discard = true;
+        app.download_paused = true;
+
+        finish_model_download(&mut app, DownloadOutcome::Ready);
+
+        assert!(!path.exists());
+        assert!(!app.download_discard);
+        assert!(!app.download_paused);
+        assert_eq!(app.download, app::DownloadState::Idle);
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn terminal_cleanup_continues_after_a_failed_step() {
         use std::cell::RefCell;
         use std::rc::Rc;
