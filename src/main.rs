@@ -891,7 +891,9 @@ fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
     for attempt in 0..5 {
         match model::remove_model(info) {
             Ok(()) => return Ok(()),
-            Err(error) if error.contains("another scribe is using the model cache") && attempt < 4 => {
+            Err(error)
+                if error.contains("another scribe is using the model cache") && attempt < 4 =>
+            {
                 last_error = error;
                 std::thread::sleep(std::time::Duration::from_millis(40));
             }
@@ -920,7 +922,8 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
                     .and_then(remove_discarded_model);
-                clear_discarded_model_selection(app, &app.download_file);
+                let discarded_file = app.download_file.clone();
+                clear_discarded_model_selection(app, &discarded_file);
                 app.download_discard = false;
                 app.download_paused = false;
                 match result {
