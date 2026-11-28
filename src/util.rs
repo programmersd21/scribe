@@ -65,7 +65,41 @@ pub fn is_url(s: &str) -> bool {
 /// just enough url parsing to reject junk without pulling in a url crate. we
 /// care about scheme + host, not about the entire rfc. a filename with a colon
 /// or a dot is still a filename.
-pub fn parse_http_url(s: &str) -> Option<(String, String)> {
+fn valid_zone_id(zone: &str) -> bool {
+    let bytes = zone.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            index += 1;
+        } else if byte == b'%' {
+            if index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit()
+            {
+                return false;
+            }
+            index += 3;
+        } else {
+            return false;
+        }
+    }
+    !bytes.is_empty()
+}
+
+fn valid_ipvfuture(host: &str) -> bool {
+    let Some(versioned) = host.strip_prefix(['v', 'V']) else {
+        return false;
+    };
+    let Some((version, address)) = versioned.split_once('.') else {
+        return false;
+    };
+    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !address.is_empty()
+        && address.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || b"-._~!pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     let s = s.trim();
     let (scheme, rest) = s.split_once("://")?;
     if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
@@ -76,6 +110,42 @@ pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     let host = if let Some(bracketed) = host_port.strip_prefix('[') {
         let (host, suffix) = bracketed.split_once(']')?;
         host.parse::<std::net::Ipv6Addr>().ok()?;
+        if !suffix.is_empty() {
+            let port = suffix.strip_prefix(':')?;
+            if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            port.parse::<u16>().ok()?;
+        }
+        host
+    } else {'()*+,;=:".contains(&byte)
+        })
+}
+
+fn valid_bracketed_host(host: &str) -> bool {
+    if valid_ipvfuture(host) {
+        return true;
+    }
+    if let Some((address, zone)) = host.split_once("%25") {
+        address.parse::<std::net::Ipv6Addr>().is_ok() && valid_zone_id(zone)
+    } else {
+        host.parse::<std::net::Ipv6Addr>().is_ok()
+    }
+}
+
+pub fn parse_http_url(s: &str) -> Option<(String, String)> {
+    let s = s.trim();
+    let (scheme, rest) = s.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = if let Some(bracketed) = host_port.strip_prefix('[') {
+        let (host, suffix) = bracketed.split_once(']')?;
+        if !valid_bracketed_host(host) {
+            return None;
+        }
         if !suffix.is_empty() {
             let port = suffix.strip_prefix(':')?;
             if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
@@ -762,6 +832,14 @@ mod tests {
         assert!(is_url("http://user:pass@example.com:8080/a"));
         assert!(is_url("http://[::1]/audio.wav"));
         assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
+        assert!(is_url("http://[fe80::1%25eth0]/audio.wav"));
+        assert!(is_url("http://[fe80::1%25eth0]:8080/audio.wav"));
+        assert!(is_url("http://[v1.example]/audio.wav"));
+        assert!(is_url("http://[Vf.a:b!        assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
+        assert!(!is_url("http://[not-ip]/audio.wav"));'()*+,;=]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25bad%xx]/audio.wav"));
+        assert!(!is_url("http://[v.example]/audio.wav"));
         assert!(!is_url("http://[not-ip]/audio.wav"));
         assert!(!is_url("http://example.com:bad/audio.wav"));
         assert!(!is_url("http://example.com:/audio.wav"));
