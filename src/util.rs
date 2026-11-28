@@ -389,6 +389,18 @@ fn extension_bonus(name: &str) -> i32 {
 /// prefix does not match exactly so you can keep drilling down. capped at 64
 /// because nobody benefits from a list that fills the screen, and directory
 /// reads are not free.
+fn split_completion_path(input: &str, windows: bool) -> (&str, &str) {
+    let separator = if windows {
+        input.rfind(['/', '\\'])
+    } else {
+        input.rfind('/')
+    };
+    match separator {
+        Some(i) => (&input[..=i], &input[i + 1..]),
+        None => ("", input),
+    }
+}
+
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
     let raw = if input.starts_with('~') {
         expand_tilde(input)
@@ -396,10 +408,7 @@ pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
         PathBuf::from(input)
     };
     let text = raw.to_string_lossy().to_string();
-    let (dir, prefix) = match text.rfind('/') {
-        Some(i) => (&text[..=i], &text[i + 1..]),
-        None => ("", text.as_str()),
-    };
+    let (dir, prefix) = split_completion_path(&text, cfg!(windows));
     let scan = if dir.is_empty() { "." } else { dir };
     let scan = expand_tilde(scan);
     let mut out: Vec<CompletionCandidate> = Vec::new();
@@ -810,6 +819,19 @@ mod tests {
             },
         ];
         assert_eq!(common_prefix(&mixed), "éc");
+    }
+
+    #[test]
+    fn completion_path_splits_native_and_windows_separators() {
+        assert_eq!(split_completion_path("/home/user/rec", false), ("/home/user/", "rec"));
+        assert_eq!(
+            split_completion_path("C:\\Users\\user\\rec", true),
+            ("C:\\Users\\user\\", "rec")
+        );
+        assert_eq!(
+            split_completion_path("C:/Users/user/rec", true),
+            ("C:/Users/user/", "rec")
+        );
     }
 
     #[test]
