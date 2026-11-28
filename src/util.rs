@@ -315,8 +315,11 @@ fn tilde_suffix(path: &str, windows: bool) -> Option<&str> {
 
 fn with_trailing_separator(home: PathBuf) -> PathBuf {
     let mut value = home.into_os_string();
-    let text = value.to_string_lossy();
-    if !text.ends_with('/') && !text.ends_with('\\') {
+    let has_separator = {
+        let text = value.to_string_lossy();
+        text.ends_with('/') || text.ends_with('\\')
+    };
+    if !has_separator {
         value.push(std::path::MAIN_SEPARATOR.to_string());
     }
     PathBuf::from(value)
