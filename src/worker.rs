@@ -469,10 +469,16 @@ fn spawn_ingest(
     cancel: Arc<AtomicBool>,
     children: Children,
 ) -> Result<Ingest, String> {
-    let diagnostics = thread::Builder::new()
+    let diagnostics = match thread::Builder::new()
         .name("scribe-stderr".into())
         .spawn(move || drain_stderr(err))
-        .map_err(|e| format!("cannot start decoder stderr reader: {e}"))?;
+    {
+        Ok(diagnostics) => diagnostics,
+        Err(e) => {
+            kill_all(&children);
+            return Err(format!("cannot start decoder stderr reader: {e}"));
+        }
+    };
     let reader = match thread::Builder::new()
         .name("scribe-ingest".into())
         .spawn(move || {
