@@ -65,6 +65,7 @@ pub enum EventKind {
     Segment(Segment),
     Done,
     Cancelled,
+    CancelledWithWarning(String),
     Error(String),
 }
 
@@ -221,9 +222,13 @@ fn run(
     reap(children);
     let last = match result {
         Err(_) => EventKind::Error("the worker panicked. the job was abandoned; try again".into()),
-        Ok(_) if cancel.load(Ordering::Relaxed) => EventKind::Cancelled,
-        Ok(Ok(())) => EventKind::Done,
+        Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e.starts_with("cancelled; ") => {
+            EventKind::CancelledWithWarning(e["cancelled; ".len()..].to_string())
+        }
+        Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e == "cancelled" => EventKind::Cancelled,
         Ok(Err(e)) => EventKind::Error(e),
+        Ok(Ok(())) if cancel.load(Ordering::Relaxed) => EventKind::Cancelled,
+        Ok(Ok(())) => EventKind::Done,
     };
     let _ = tx.send(Event::new(job_id, last));
 }
@@ -431,6 +436,8 @@ struct Ingest {
     reader: Option<thread::JoinHandle<usize>>,
     diagnostics: Option<thread::JoinHandle<Vec<u8>>>,
     children: Children,
+    cancel: Arc<AtomicBool>,
+    finished: bool,
 }
 
 impl Ingest {
@@ -443,6 +450,7 @@ impl Ingest {
             .take()
             .and_then(|h| h.join().ok())
             .unwrap_or_default();
+        self.finished = true;
         (total, first_line(&tail))
     }
 }
@@ -452,7 +460,10 @@ impl Drop for Ingest {
         // a cancelled job can return before the readers see eof. kill the
         // decoder so their blocking reads end, then join them: no detached
         // reader may outlive the job it was reading for.
-        kill_all(&self.children);
+        if !self.finished {
+            self.cancel.store(true, Ordering::Relaxed);
+            kill_all(&self.children);
+        }
         if let Some(h) = self.reader.take() {
             let _ = h.join();
         }
@@ -462,7 +473,16 @@ impl Drop for Ingest {
     }
 }
 
-fn send_chunk(tx: &SyncSender<Chunk>, mut chunk: Chunk, cancel: &AtomicBool) -> bool {
+fn send_chunk(tx: &SyncSender<Chunk>, chunk: Chunk, cancel: &AtomicBool) -> bool {
+    send_chunk_with(tx, chunk, cancel, || {})
+}
+
+fn send_chunk_with(
+    tx: &SyncSender<Chunk>,
+    mut chunk: Chunk,
+    cancel: &AtomicBool,
+    mut on_full: impl FnMut(),
+) -> bool {
     loop {
         if cancel.load(Ordering::Relaxed) {
             return false;
@@ -471,6 +491,7 @@ fn send_chunk(tx: &SyncSender<Chunk>, mut chunk: Chunk, cancel: &AtomicBool) -> 
             Ok(()) => return true,
             Err(std::sync::mpsc::TrySendError::Full(returned)) => {
                 chunk = returned;
+                on_full();
                 thread::sleep(Duration::from_millis(10));
             }
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
@@ -495,21 +516,22 @@ fn spawn_ingest(
             return Err(format!("cannot start decoder stderr reader: {e}"));
         }
     };
+    let reader_cancel = cancel.clone();
     let reader = match thread::Builder::new()
         .name("scribe-ingest".into())
         .spawn(move || {
             let mut bytes = vec![0u8; CHUNK * 4];
             let mut total = 0usize;
-            while !cancel.load(Ordering::Relaxed) {
+            while !reader_cancel.load(Ordering::Relaxed) {
                 let n = match read_full(&mut out, &mut bytes) {
                     Ok(0) => break,
                     Ok(n) => n,
                     Err(e) => {
-                        if !cancel.load(Ordering::Relaxed) {
+                        if !reader_cancel.load(Ordering::Relaxed) {
                             let _ = send_chunk(
                                 &tx,
                                 Chunk::Failed(format!("could not read decoded audio: {e}")),
-                                &cancel,
+                                &reader_cancel,
                             );
                         }
                         return total;
@@ -517,7 +539,7 @@ fn spawn_ingest(
                 };
                 let samples = bytes_to_f32(&bytes[..n - n % 4]);
                 total += samples.len();
-                if !send_chunk(&tx, Chunk::Samples(samples), &cancel) {
+                if !send_chunk(&tx, Chunk::Samples(samples), &reader_cancel) {
                     return total;
                 }
                 if n < bytes.len() {
@@ -537,6 +559,8 @@ fn spawn_ingest(
         reader: Some(reader),
         diagnostics: Some(diagnostics),
         children,
+        cancel,
+        finished: false,
     })
 }
 
@@ -972,7 +996,11 @@ mod tests {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Event {
                     job_id: 7,
-                    kind: EventKind::Error(_) | EventKind::Cancelled | EventKind::Done,
+                    kind:
+                        EventKind::Error(_)
+                        | EventKind::Cancelled
+                        | EventKind::CancelledWithWarning(_)
+                        | EventKind::Done,
                 }) => {
                     terminal = true;
                     break;
@@ -1008,18 +1036,52 @@ mod tests {
         assert!(tx.try_send(Chunk::Samples(vec![0.0])).is_ok());
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
+        let (full_tx, full_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
 
         let worker = thread::spawn(move || {
-            let sent = send_chunk(&tx, Chunk::Samples(vec![1.0]), &worker_cancel);
+            let sent = send_chunk_with(&tx, Chunk::Samples(vec![1.0]), &worker_cancel, || {
+                let _ = full_tx.send(());
+            });
             done_tx.send(sent).unwrap();
         });
 
-        thread::sleep(Duration::from_millis(30));
+        full_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
         cancel.store(true, Ordering::Relaxed);
         assert!(!done_rx.recv_timeout(Duration::from_secs(1)).unwrap());
         worker.join().unwrap();
         assert!(matches!(rx.try_recv(), Ok(Chunk::Samples(_))));
+    }
+
+    #[test]
+    fn dropping_ingest_unblocks_a_reader_waiting_on_backpressure() {
+        let (tx, _rx) = mpsc::sync_channel(1);
+        tx.try_send(Chunk::Samples(vec![0.0])).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let reader_cancel = cancel.clone();
+        let (full_tx, full_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let sent = send_chunk_with(&tx, Chunk::Samples(vec![1.0]), &reader_cancel, || {
+                let _ = full_tx.send(());
+            });
+            done_tx.send(sent).unwrap();
+            0
+        });
+        let ingest = Ingest {
+            reader: Some(reader),
+            diagnostics: None,
+            children: Arc::new(Mutex::new(Vec::new())),
+            cancel,
+            finished: false,
+        };
+
+        full_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
+        let dropper = thread::spawn(move || drop(ingest));
+        dropper.join().unwrap();
+        assert!(!done_rx.recv_timeout(Duration::from_secs(1)).unwrap());
     }
 
     #[cfg(unix)]

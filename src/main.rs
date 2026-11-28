@@ -209,6 +209,9 @@ fn collect_plain_segments(
             WorkerEventKind::Segment(segment) => segments.push(segment),
             WorkerEventKind::Done => return Ok(segments),
             WorkerEventKind::Cancelled => return Err("transcription cancelled".into()),
+            WorkerEventKind::CancelledWithWarning(message) => {
+                return Err(format!("transcription cancelled; {message}"));
+            }
             WorkerEventKind::Error(error) => return Err(error),
             _ => {}
         }
@@ -336,7 +339,10 @@ fn run_tui(args: &Args) -> Result<(), String> {
             }
             let terminal = matches!(
                 ev.kind,
-                WorkerEventKind::Done | WorkerEventKind::Cancelled | WorkerEventKind::Error(_)
+                WorkerEventKind::Done
+                    | WorkerEventKind::Cancelled
+                    | WorkerEventKind::CancelledWithWarning(_)
+                    | WorkerEventKind::Error(_)
             );
             needs_redraw = true;
             app.accept_event(ev);
@@ -886,16 +892,95 @@ fn change_setting(app: &mut App, forward: bool) {
     }
 }
 
+fn retry_cache_removal(mut remove: impl FnMut() -> Result<(), String>) -> Result<(), String> {
+    let mut last_error = String::new();
+    for attempt in 0..20 {
+        match remove() {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if error.contains("another scribe is using the model cache") && attempt < 19 =>
+            {
+                last_error = error;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error)
+}
+
+fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
+    retry_cache_removal(|| model::remove_model(info))
+}
+
+fn remove_discarded_partial(info: &model::ModelInfo) -> Result<(), String> {
+    retry_cache_removal(|| model::remove_partial(info))
+}
+
+fn normalized_path(path: &std::path::Path) -> std::path::PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(path)
+    };
+    let mut normalized = std::path::PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn paths_equal(left: &std::path::Path, right: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+fn selected_model_matches_managed(app: &App, file: &str) -> bool {
+    let managed = model::cache_dir().join(file);
+    let selected = std::path::Path::new(&app.model_name);
+    if selected.as_os_str().is_empty() {
+        return false;
+    }
+    let selected = std::fs::canonicalize(selected).unwrap_or_else(|_| normalized_path(selected));
+    let managed = std::fs::canonicalize(&managed).unwrap_or_else(|_| normalized_path(&managed));
+    paths_equal(&selected, &managed)
+}
+
+fn clear_discarded_model_selection(app: &mut App, file: &str, selected_managed: bool) {
+    let path = model::cache_dir().join(file);
+    if selected_managed && !path.exists() {
+        app.model_name.clear();
+        app.model_label = "-".into();
+    }
+}
+
 fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
             if app.download_discard {
+                let discarded_file = app.download_file.clone();
+                let selected_managed = selected_model_matches_managed(app, &discarded_file);
                 let result = app
                     .download_models
                     .iter()
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
-                    .and_then(model::remove_model);
+                    .and_then(remove_discarded_model);
+                clear_discarded_model_selection(app, &discarded_file, selected_managed);
                 app.download_discard = false;
                 app.download_paused = false;
                 match result {
@@ -935,7 +1020,7 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .iter()
                     .find(|info| info.file == app.download_file)
                 {
-                    if let Err(err) = model::remove_partial(info) {
+                    if let Err(err) = remove_discarded_partial(info) {
                         app.download_info = err.clone();
                         app.set_message(err);
                     } else {
@@ -970,6 +1055,10 @@ fn start_download(
     let Some(info) = app.download_models.get(app.download_index).cloned() else {
         return;
     };
+    if downloader.is_some() && info.file == app.download_file {
+        app.set_message("download in progress (press c or esc to pause)");
+        return;
+    }
     let cached = model::cache_dir().join(info.file);
     if cached.is_file() {
         if let Err(e) = model::validate_cached(&info, &cached) {
@@ -987,7 +1076,7 @@ fn start_download(
         let what = if app.download_paused {
             "previous download is still stopping; press enter again in a moment"
         } else {
-            "download in progress (press c or esc to pause)"
+            "another download is in progress"
         };
         app.set_message(what);
         return;
@@ -1077,6 +1166,8 @@ use util::{duration_short, human_bytes, timestamp_short};
 mod tests {
     use super::*;
 
+    static TEST_CACHE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn plain_transcription_requires_worker_completion() {
         let segment = || export::Segment::new(0, 100, "hello".into());
@@ -1106,7 +1197,38 @@ mod tests {
     }
 
     #[test]
+    fn cache_removal_retries_contention_beyond_the_old_window() {
+        let mut attempts = 0;
+        let result = retry_cache_removal(|| {
+            attempts += 1;
+            if attempts < 7 {
+                Err("another scribe is using the model cache".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 7);
+    }
+
+    #[test]
+    fn cache_removal_retries_transient_lock_contention() {
+        let mut attempts = 0;
+        let result = retry_cache_removal(|| {
+            attempts += 1;
+            if attempts < 3 {
+                Err("another scribe is using the model cache".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
     fn cancel_after_download_commit_removes_the_completed_model() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("scribe-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1119,17 +1241,124 @@ mod tests {
         let mut app = App::new(&crate::cli::Args::default());
         app.download_models = crate::model::CATALOG.to_vec();
         app.download_file = info.file.to_string();
+        app.model_name = path.to_string_lossy().to_string();
+        app.model_label = info.label.to_string();
         app.download_discard = true;
         app.download_paused = true;
 
         finish_model_download(&mut app, DownloadOutcome::Ready);
 
         assert!(!path.exists());
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
         assert!(!app.download_discard);
         assert!(!app.download_paused);
         assert_eq!(app.download, app::DownloadState::Idle);
         crate::model::set_test_cache_dir(None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discard_clears_equivalent_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
+        let info = crate::model::find("tiny").unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"model").unwrap();
+        let alias = dir
+            .join("..")
+            .join(dir.file_name().unwrap())
+            .join(info.file);
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = alias.to_string_lossy().into_owned();
+        app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn discard_clears_case_insensitive_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
+        let info = crate::model::find("tiny").unwrap();
+        let dir = std::env::temp_dir().join(format!("scribe-case-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"model").unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = path.to_string_lossy().to_uppercase();
+        app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discard_clears_symlinked_managed_model_selection() {
+        let _guard = TEST_CACHE_LOCK.lock().unwrap();
+        use std::os::unix::fs::symlink;
+        let info = crate::model::find("tiny").unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("scribe-symlink-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        let alias = dir.join("selected-model.bin");
+        std::fs::write(&path, b"model").unwrap();
+        symlink(&path, &alias).unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = alias.to_string_lossy().into_owned();
+        app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discard_does_not_clear_custom_model_with_matching_filename() {
+        let info = crate::model::find("tiny").unwrap();
+        let custom = std::env::temp_dir().join("custom").join(info.file);
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = custom.to_string_lossy().to_string();
+        app.model_label = "custom".into();
+
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert_eq!(app.model_name, custom.to_string_lossy().into_owned());
+        assert_eq!(app.model_label, "custom");
     }
 
     #[test]

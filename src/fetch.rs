@@ -154,8 +154,8 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
         _ = cancelled(cancel) => None,
     };
     let Some(crate_result) = crate_result else {
-        let _ = std::fs::remove_file(&direct);
-        return Err("cancelled".into());
+        let cleanup = cleanup_paths(&[&direct]);
+        return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
     };
     let path = match crate_result {
         Ok(p) if p.is_absolute() => p,
@@ -187,8 +187,11 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
             {
                 Ok(child) => child,
                 Err(e) => {
-                    cleanup_fallback(&fallback, &direct);
-                    return Err(format!("could not download audio: {e}"));
+                    let cleanup = cleanup_fallback(&fallback, &direct);
+                    return Err(format!(
+                        "could not download audio: {e}{}",
+                        cleanup_suffix(cleanup)
+                    ));
                 }
             };
             let status = tokio::select! {
@@ -196,20 +199,21 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                     Ok(status) => status,
                     Err(e) => {
                         stop_child(&mut child).await;
-                        cleanup_fallback(&fallback, &direct);
-                        return Err(format!("could not download audio: {e}"));
+                        let cleanup = cleanup_fallback(&fallback, &direct);
+                        return Err(format!("could not download audio: {e}{}", cleanup_suffix(cleanup)));
                     }
                 },
                 _ = cancelled(cancel) => {
                     stop_child(&mut child).await;
-                    cleanup_fallback(&fallback, &direct);
-                    return Err("cancelled".into());
+                    let cleanup = cleanup_fallback(&fallback, &direct);
+                    return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
                 }
             };
             if !status.success() || !fallback.is_file() {
-                cleanup_fallback(&fallback, &direct);
+                let cleanup = cleanup_fallback(&fallback, &direct);
                 return Err(format!(
-                    "no audio came out. the http path said: {crate_err}"
+                    "no audio came out. the http path said: {crate_err}{}",
+                    cleanup_suffix(cleanup)
                 ));
             }
             fallback
@@ -217,14 +221,24 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     };
 
     if cancel.load(Ordering::Relaxed) {
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(&direct);
-        return Err("cancelled".into());
+        let cleanup = cleanup_paths(&[&path, &direct]);
+        return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
     }
     // the crate may have written to `direct` even when it reported another
     // path; keep only the file we actually return.
-    if direct != path {
-        let _ = std::fs::remove_file(&direct);
+    if direct != path
+        && let Err(error) = cleanup_paths(&[&direct])
+    {
+        let returned_cleanup = cleanup_paths(&[&path]);
+        let detail = match returned_cleanup {
+            Ok(()) => error,
+            Err(returned_error) => {
+                format!("{error}; returned audio cleanup also failed: {returned_error}")
+            }
+        };
+        return Err(format!(
+            "audio was downloaded but temporary-file cleanup failed: {detail}"
+        ));
     }
 
     Ok(FetchedAudio {
@@ -272,9 +286,34 @@ pub fn ffmpeg_path() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-fn cleanup_fallback(fallback: &Path, direct: &Path) {
-    let _ = std::fs::remove_file(fallback);
-    let _ = std::fs::remove_file(direct);
+fn cleanup_paths(paths: &[&Path]) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("{}: {error}", path.display())),
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "could not remove partial download(s): {}",
+            failures.join("; ")
+        ))
+    }
+}
+
+fn cleanup_fallback(fallback: &Path, direct: &Path) -> Result<(), String> {
+    cleanup_paths(&[fallback, direct])
+}
+
+fn cleanup_suffix(result: Result<(), String>) -> String {
+    result
+        .err()
+        .map(|error| format!("; {error}"))
+        .unwrap_or_default()
 }
 
 /// remove a partial audio file left behind by a cancelled/interrupted fetch.
@@ -330,9 +369,27 @@ mod tests {
         std::fs::write(&fallback, b"partial").unwrap();
         std::fs::write(&direct, b"partial").unwrap();
 
-        cleanup_fallback(&fallback, &direct);
+        cleanup_fallback(&fallback, &direct).unwrap();
 
         assert!(!fallback.exists());
+        assert!(!direct.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fallback_cleanup_reports_filesystem_failures() {
+        let dir =
+            std::env::temp_dir().join(format!("scribe-fallback-error-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fallback = dir.join("fallback.webm");
+        let direct = dir.join("direct.m4a");
+        std::fs::create_dir_all(&fallback).unwrap();
+        std::fs::write(&direct, b"partial").unwrap();
+
+        let error = cleanup_fallback(&fallback, &direct).unwrap_err();
+
+        assert!(error.contains("fallback.webm"));
         assert!(!direct.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -65,6 +65,55 @@ pub fn is_url(s: &str) -> bool {
 /// just enough url parsing to reject junk without pulling in a url crate. we
 /// care about scheme + host, not about the entire rfc. a filename with a colon
 /// or a dot is still a filename.
+fn valid_zone_id(zone: &str) -> bool {
+    let bytes = zone.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            index += 1;
+        } else if byte == b'%' {
+            if index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit()
+            {
+                return false;
+            }
+            index += 3;
+        } else {
+            return false;
+        }
+    }
+    !bytes.is_empty()
+}
+
+fn valid_ipvfuture(host: &str) -> bool {
+    let versioned = host.strip_prefix('v').or_else(|| host.strip_prefix('V'));
+    let Some(versioned) = versioned else {
+        return false;
+    };
+    let Some((version, address)) = versioned.split_once('.') else {
+        return false;
+    };
+    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !address.is_empty()
+        && address
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:".contains(&byte))
+}
+
+fn valid_bracketed_host(host: &str) -> bool {
+    if valid_ipvfuture(host) {
+        return true;
+    }
+    if let Some((address, zone)) = host.split_once("%25") {
+        address.parse::<std::net::Ipv6Addr>().is_ok() && valid_zone_id(zone)
+    } else {
+        host.parse::<std::net::Ipv6Addr>().is_ok()
+    }
+}
+
 pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     let s = s.trim();
     let (scheme, rest) = s.split_once("://")?;
@@ -75,7 +124,9 @@ pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     let host_port = authority.rsplit('@').next()?;
     let host = if let Some(bracketed) = host_port.strip_prefix('[') {
         let (host, suffix) = bracketed.split_once(']')?;
-        host.parse::<std::net::Ipv6Addr>().ok()?;
+        if !valid_bracketed_host(host) {
+            return None;
+        }
         if !suffix.is_empty() {
             let port = suffix.strip_prefix(':')?;
             if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
@@ -100,7 +151,12 @@ pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     if host.is_empty() || host.chars().any(|c| c.is_whitespace()) {
         return None;
     }
-    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
+    let normalized_host = if let Some((address, zone)) = host.split_once("%25") {
+        format!("{}%25{zone}", address.to_ascii_lowercase())
+    } else {
+        host.to_ascii_lowercase()
+    };
+    Some((scheme.to_ascii_lowercase(), normalized_host))
 }
 
 fn host_matches(url: &str, hosts: &[&str]) -> bool {
@@ -451,20 +507,45 @@ fn split_completion_path(input: &str, windows: bool) -> (&str, &str) {
     };
     match separator {
         Some(i) => (&input[..=i], &input[i + 1..]),
+        None if windows
+            && input.as_bytes().get(1) == Some(&b':')
+            && input.as_bytes()[0].is_ascii_alphabetic() =>
+        {
+            (&input[..2], &input[2..])
+        }
         None => ("", input),
     }
 }
 
+fn is_windows_unc_path(input: &str, windows: bool) -> bool {
+    windows
+        && input
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| *byte == b'/' || *byte == b'\\')
+        && input
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| *byte == b'/' || *byte == b'\\')
+}
+
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
+    complete_path_with(input, cfg!(windows))
+}
+
+fn complete_path_with(input: &str, windows: bool) -> Vec<CompletionCandidate> {
     let raw = if input.starts_with('~') {
-        expand_tilde(input)
+        expand_tilde_from(input, home_dir(), windows)
     } else {
         PathBuf::from(input)
     };
     let text = raw.to_string_lossy().to_string();
-    let (dir, prefix) = split_completion_path(&text, cfg!(windows));
+    if is_windows_unc_path(&text, windows) {
+        return Vec::new();
+    }
+    let (dir, prefix) = split_completion_path(&text, windows);
     let scan = if dir.is_empty() { "." } else { dir };
-    let scan = expand_tilde(scan);
+    let scan = expand_tilde_from(scan, home_dir(), windows);
     let mut out: Vec<CompletionCandidate> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&scan) {
         let mut found: Vec<CompletionCandidate> = entries
@@ -739,7 +820,6 @@ mod tests {
         assert!(is_url("HTTP://EXAMPLE.COM"));
         assert!(!is_url("/tmp/a.wav"));
         assert!(!is_url(r"c:\audio\file.wav"));
-        // schemes that look like urls but are not http(s) are paths
         assert!(!is_url("ftp://example.com/a"));
         assert!(!is_url("file:///tmp/a.wav"));
         assert!(!is_url("not a url"));
@@ -749,7 +829,23 @@ mod tests {
         assert!(is_url("http://user:pass@example.com:8080/a"));
         assert!(is_url("http://[::1]/audio.wav"));
         assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
+        assert!(is_url("http://[fe80::1%25eth0]/audio.wav"));
+        assert!(is_url("http://[fe80::1%25eth0]:8080/audio.wav"));
+        assert_eq!(
+            parse_http_url("http://[fe80::1%25Eth0]/audio.wav")
+                .unwrap()
+                .1,
+            "fe80::1%25Eth0"
+        );
+        assert!(is_url("http://[v1.example]/audio.wav"));
+        assert!(is_url("http://[Vf.a:b!$&'()*+,;=]/audio.wav"));
         assert!(!is_url("http://[not-ip]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25bad%xx]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25eth0%zz]/audio.wav"));
+        assert!(!is_url("http://[fe80::1%25eth0]:99999/audio.wav"));
+        assert!(!is_url("http://[v.example]/audio.wav"));
+        assert!(!is_url("http://[v1.]/audio.wav"));
         assert!(!is_url("http://example.com:bad/audio.wav"));
         assert!(!is_url("http://example.com:/audio.wav"));
     }
@@ -917,6 +1013,51 @@ mod tests {
             split_completion_path("C:/Users/user/rec", true),
             ("C:/Users/user/", "rec")
         );
+        assert_eq!(split_completion_path("C:rec", true), ("C:", "rec"));
+        assert_eq!(split_completion_path("C:", true), ("C:", ""));
+        assert!(is_windows_unc_path("\\\\server\\share", true));
+        assert!(is_windows_unc_path("//server/share", true));
+        assert!(is_windows_unc_path(r"/\\server/share", true));
+        assert!(is_windows_unc_path(r"\/server/share", true));
+        assert!(is_windows_unc_path(r"\//server/share", true));
+        assert!(!is_windows_unc_path("C:\\Users\\person", true));
+        assert!(!is_windows_unc_path("\\\\server\\share", false));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn complete_path_uses_windows_separators_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("scribe-win-cmpl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("recording.wav"), b"x").unwrap();
+        let input = format!("{}\\record", dir.display());
+        let candidates = complete_path(&input);
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.value.ends_with("recording.wav"))
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn complete_path_uses_windows_separator_mode_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("scribe-cmpl-win-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("recording.wav"), b"x").unwrap();
+
+        let input = format!("{}/record", dir.display());
+        let candidates = complete_path_with(&input, true);
+
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.value.ends_with("recording.wav"))
+        );
+        assert!(complete_path_with(r"\\\\server\\share", true).is_empty());
+        assert!(complete_path_with(r"/\\server/share", true).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
