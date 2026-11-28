@@ -1401,7 +1401,8 @@ mod tests {
         }
         assert!(fs::metadata(&dir).unwrap().len() >= 1024);
         assert!(read_model_header(&dir).is_err());
-        assert!(validate_custom(&dir).is_err());
+        let error = validate_custom(&dir).unwrap_err();
+        assert!(error.contains("cannot read model header"));
         fs::remove_dir_all(&dir).unwrap();
     }
 
