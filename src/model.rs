@@ -1388,13 +1388,20 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
-    fn custom_model_header_read_errors_are_rejected() {
+    fn validate_custom_rejects_unreadable_model_headers() {
         let dir = std::env::temp_dir().join(format!("scribe-header-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("truncated.bin");
-        fs::write(&path, b"gg").unwrap();
-        assert!(read_model_header(&path).is_err());
+        for index in 0..512 {
+            fs::write(dir.join(format!("entry-{index}")), b"x").unwrap();
+            if fs::metadata(&dir).unwrap().len() >= 1024 {
+                break;
+            }
+        }
+        assert!(fs::metadata(&dir).unwrap().len() >= 1024);
+        assert!(read_model_header(&dir).is_err());
+        assert!(validate_custom(&dir).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
