@@ -341,7 +341,9 @@ impl App {
             WorkerEventKind::Segment(s) => self.on_segment(s),
             WorkerEventKind::Done => self.on_done(),
             WorkerEventKind::Cancelled => self.on_cancelled(),
-            WorkerEventKind::CancelledWithWarning(message) => self.on_cancelled_with_warning(message),
+            WorkerEventKind::CancelledWithWarning(message) => {
+                self.on_cancelled_with_warning(message)
+            }
             WorkerEventKind::Error(e) => self.on_error(e),
         }
         true
