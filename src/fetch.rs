@@ -187,8 +187,8 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
             {
                 Ok(child) => child,
                 Err(e) => {
-                    cleanup_fallback(&fallback, &direct);
-                    return Err(format!("could not download audio: {e}"));
+                    let cleanup = cleanup_fallback(&fallback, &direct);
+                    return Err(format!("could not download audio: {e}{}", cleanup_suffix(cleanup)));
                 }
             };
             let status = tokio::select! {
@@ -196,20 +196,21 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                     Ok(status) => status,
                     Err(e) => {
                         stop_child(&mut child).await;
-                        cleanup_fallback(&fallback, &direct);
-                        return Err(format!("could not download audio: {e}"));
+                        let cleanup = cleanup_fallback(&fallback, &direct);
+                        return Err(format!("could not download audio: {e}{}", cleanup_suffix(cleanup)));
                     }
                 },
                 _ = cancelled(cancel) => {
                     stop_child(&mut child).await;
-                    cleanup_fallback(&fallback, &direct);
-                    return Err("cancelled".into());
+                    let cleanup = cleanup_fallback(&fallback, &direct);
+                    return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
                 }
             };
             if !status.success() || !fallback.is_file() {
-                cleanup_fallback(&fallback, &direct);
+                let cleanup = cleanup_fallback(&fallback, &direct);
                 return Err(format!(
-                    "no audio came out. the http path said: {crate_err}"
+                    "no audio came out. the http path said: {crate_err}{}",
+                    cleanup_suffix(cleanup)
                 ));
             }
             fallback
@@ -272,9 +273,27 @@ pub fn ffmpeg_path() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-fn cleanup_fallback(fallback: &Path, direct: &Path) {
-    let _ = std::fs::remove_file(fallback);
-    let _ = std::fs::remove_file(direct);
+fn cleanup_fallback(fallback: &Path, direct: &Path) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for path in [fallback, direct] {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("{}: {error}", path.display())),
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("could not remove partial download(s): {}", failures.join("; ")))
+    }
+}
+
+fn cleanup_suffix(result: Result<(), String>) -> String {
+    result
+        .err()
+        .map(|error| format!("; {error}"))
+        .unwrap_or_default()
 }
 
 /// remove a partial audio file left behind by a cancelled/interrupted fetch.
@@ -330,9 +349,26 @@ mod tests {
         std::fs::write(&fallback, b"partial").unwrap();
         std::fs::write(&direct, b"partial").unwrap();
 
-        cleanup_fallback(&fallback, &direct);
+        cleanup_fallback(&fallback, &direct).unwrap();
 
         assert!(!fallback.exists());
+        assert!(!direct.exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn fallback_cleanup_reports_filesystem_failures() {
+        let dir = std::env::temp_dir().join(format!("scribe-fallback-error-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fallback = dir.join("fallback.webm");
+        let direct = dir.join("direct.m4a");
+        std::fs::create_dir_all(&fallback).unwrap();
+        std::fs::write(&direct, b"partial").unwrap();
+
+        let error = cleanup_fallback(&fallback, &direct).unwrap_err();
+
+        assert!(error.contains("fallback.webm"));
         assert!(!direct.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
