@@ -1031,14 +1031,9 @@ mod tests {
         let (done_tx, done_rx) = mpsc::channel();
 
         let worker = thread::spawn(move || {
-            let sent = send_chunk_with(
-                &tx,
-                Chunk::Samples(vec![1.0]),
-                &worker_cancel,
-                || {
-                    let _ = full_tx.send(());
-                },
-            );
+            let sent = send_chunk_with(&tx, Chunk::Samples(vec![1.0]), &worker_cancel, || {
+                let _ = full_tx.send(());
+            });
             done_tx.send(sent).unwrap();
         });
 
