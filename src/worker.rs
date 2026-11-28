@@ -996,7 +996,11 @@ mod tests {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Event {
                     job_id: 7,
-                    kind: EventKind::Error(_) | EventKind::Cancelled | EventKind::CancelledWithWarning(_) | EventKind::Done,
+                    kind:
+                        EventKind::Error(_)
+                        | EventKind::Cancelled
+                        | EventKind::CancelledWithWarning(_)
+                        | EventKind::Done,
                 }) => {
                     terminal = true;
                     break;
