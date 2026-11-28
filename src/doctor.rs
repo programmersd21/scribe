@@ -346,7 +346,8 @@ mod tests {
     #[test]
     fn cache_status_accepts_symlinked_directory_ancestors() {
         use std::os::unix::fs::symlink;
-        let dir = std::env::temp_dir().join(format!("scribe-doctor-symlink-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("scribe-doctor-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("target")).unwrap();
         symlink(dir.join("target"), dir.join("linked")).unwrap();
