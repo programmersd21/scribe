@@ -169,7 +169,13 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                 now_millis()
             ));
             let mut child = tokio::process::Command::new(&ytdlp)
-                .args(["--no-playlist", "--no-warnings", "-f", "bestaudio/best", "-o"])
+                .args([
+                    "--no-playlist",
+                    "--no-warnings",
+                    "-f",
+                    "bestaudio/best",
+                    "-o",
+                ])
                 .arg(&fallback)
                 .arg(url)
                 .stdin(std::process::Stdio::null())
