@@ -26,10 +26,18 @@ struct Row {
 }
 
 fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
+    let cache = if cache.is_absolute() {
+        cache.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(current) => current.join(cache),
+            Err(_) => return (Verdict::Fail, "cannot resolve relative cache path"),
+        }
+    };
     if cache.is_dir() {
         return (Verdict::Ok, "directory exists; write access not tested");
     }
-    if std::fs::symlink_metadata(cache).is_ok() {
+    if std::fs::symlink_metadata(&cache).is_ok() {
         return (Verdict::Fail, "path exists but is not a usable directory");
     }
     for ancestor in cache.ancestors().skip(1) {
@@ -340,6 +348,21 @@ mod tests {
         );
         std::fs::remove_file(&cache).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cache_status_accepts_relative_missing_paths() {
+        let cache = std::path::PathBuf::from(format!(
+            "scribe-doctor-relative-{}/nested/models",
+            std::process::id()
+        ));
+        assert_eq!(
+            cache_status(&cache),
+            (
+                Verdict::Warn,
+                "will be created on first download; write access not tested"
+            )
+        );
     }
 
     #[cfg(unix)]
