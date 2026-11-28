@@ -894,14 +894,14 @@ fn change_setting(app: &mut App, forward: bool) {
 
 fn retry_cache_removal(mut remove: impl FnMut() -> Result<(), String>) -> Result<(), String> {
     let mut last_error = String::new();
-    for attempt in 0..5 {
+    for attempt in 0..20 {
         match remove() {
             Ok(()) => return Ok(()),
             Err(error)
-                if error.contains("another scribe is using the model cache") && attempt < 4 =>
+                if error.contains("another scribe is using the model cache") && attempt < 19 =>
             {
                 last_error = error;
-                std::thread::sleep(std::time::Duration::from_millis(40));
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
             Err(error) => return Err(error),
         }
@@ -938,10 +938,24 @@ fn normalized_path(path: &std::path::Path) -> std::path::PathBuf {
     normalized
 }
 
-fn clear_discarded_model_selection(app: &mut App, file: &str) {
+fn selected_model_matches_managed(app: &App, file: &str) -> bool {
+    let managed = model::cache_dir().join(file);
+    let selected = std::path::Path::new(&app.model_name);
+    if selected.as_os_str().is_empty() {
+        return false;
+    }
+    match (
+        std::fs::canonicalize(selected),
+        std::fs::canonicalize(&managed),
+    ) {
+        (Ok(selected), Ok(managed)) => selected == managed,
+        _ => normalized_path(selected) == normalized_path(&managed),
+    }
+}
+
+fn clear_discarded_model_selection(app: &mut App, file: &str, selected_managed: bool) {
     let path = model::cache_dir().join(file);
-    let selected = normalized_path(std::path::Path::new(&app.model_name));
-    if !path.exists() && selected == normalized_path(&path) {
+    if selected_managed && !path.exists() {
         app.model_name.clear();
         app.model_label = "-".into();
     }
@@ -951,14 +965,15 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
             if app.download_discard {
+                let discarded_file = app.download_file.clone();
+                let selected_managed = selected_model_matches_managed(app, &discarded_file);
                 let result = app
                     .download_models
                     .iter()
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
                     .and_then(remove_discarded_model);
-                let discarded_file = app.download_file.clone();
-                clear_discarded_model_selection(app, &discarded_file);
+                clear_discarded_model_selection(app, &discarded_file, selected_managed);
                 app.download_discard = false;
                 app.download_paused = false;
                 match result {
@@ -1173,6 +1188,21 @@ mod tests {
     }
 
     #[test]
+    fn cache_removal_retries_contention_beyond_the_old_window() {
+        let mut attempts = 0;
+        let result = retry_cache_removal(|| {
+            attempts += 1;
+            if attempts < 7 {
+                Err("another scribe is using the model cache".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts, 7);
+    }
+
+    #[test]
     fn cache_removal_retries_transient_lock_contention() {
         let mut attempts = 0;
         let result = retry_cache_removal(|| {
@@ -1235,9 +1265,40 @@ mod tests {
         let mut app = App::new(&crate::cli::Args::default());
         app.model_name = alias.to_string_lossy().into_owned();
         app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
         std::fs::remove_file(&path).unwrap();
 
-        clear_discarded_model_selection(&mut app, info.file);
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discard_clears_symlinked_managed_model_selection() {
+        use std::os::unix::fs::symlink;
+        let info = crate::model::find("tiny").unwrap();
+        let dir = std::env::temp_dir().join(format!("scribe-symlink-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        let alias = dir.join("selected-model.bin");
+        std::fs::write(&path, b"model").unwrap();
+        symlink(&path, &alias).unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = alias.to_string_lossy().into_owned();
+        app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
 
         assert!(app.model_name.is_empty());
         assert_eq!(app.model_label, "-");
@@ -1253,7 +1314,8 @@ mod tests {
         app.model_name = custom.to_string_lossy().to_string();
         app.model_label = "custom".into();
 
-        clear_discarded_model_selection(&mut app, info.file);
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
 
         assert_eq!(app.model_name, custom.to_string_lossy().into_owned());
         assert_eq!(app.model_label, "custom");
