@@ -288,6 +288,7 @@ mod tests {
     fn cache_status_does_not_claim_unchecked_write_access() {
         let dir = std::env::temp_dir().join(format!("scribe-doctor-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
         let cache = dir.join("models");
         assert_eq!(
             cache_status(&cache),
