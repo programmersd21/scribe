@@ -90,10 +90,8 @@ impl Handle {
     }
 
     pub fn cancel(&self) {
-        if !self.finished {
-            self.cancel.store(true, Ordering::Relaxed);
-            kill_all(&self.children);
-        }
+        self.cancel.store(true, Ordering::Relaxed);
+        kill_all(&self.children);
     }
 
     /// suspend inference without killing the decoder. the worker parks itself
@@ -457,8 +455,10 @@ impl Drop for Ingest {
         // a cancelled job can return before the readers see eof. kill the
         // decoder so their blocking reads end, then join them: no detached
         // reader may outlive the job it was reading for.
-        self.cancel.store(true, Ordering::Relaxed);
-        kill_all(&self.children);
+        if !self.finished {
+            self.cancel.store(true, Ordering::Relaxed);
+            kill_all(&self.children);
+        }
         if let Some(h) = self.reader.take() {
             let _ = h.join();
         }
