@@ -1142,12 +1142,16 @@ mod tests {
         let mut app = App::new(&crate::cli::Args::default());
         app.download_models = crate::model::CATALOG.to_vec();
         app.download_file = info.file.to_string();
+        app.model_name = path.to_string_lossy().to_string();
+        app.model_label = info.label.to_string();
         app.download_discard = true;
         app.download_paused = true;
 
         finish_model_download(&mut app, DownloadOutcome::Ready);
 
         assert!(!path.exists());
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
         assert!(!app.download_discard);
         assert!(!app.download_paused);
         assert_eq!(app.download, app::DownloadState::Idle);
