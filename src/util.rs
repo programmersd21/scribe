@@ -691,7 +691,7 @@ mod tests {
         assert!(!is_youtube_url(
             "https://notyoutube.com.evil.test/watch?v=x"
         ));
-        assert!(!youtube_id("https://notyoutube.com.evil.test/watch?v=x").is_some());
+        assert!(youtube_id("https://notyoutube.com.evil.test/watch?v=x").is_none());
         assert!(is_youtube_url("https://www.youtube.com/watch?v=abc"));
         assert_eq!(
             youtube_id("https://www.youtube.com/watch?v=abc"),

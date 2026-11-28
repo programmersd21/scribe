@@ -252,6 +252,12 @@ fn run_plain(args: &Args) -> Result<String, String> {
     }
 }
 
+enum DownloadOutcome {
+    Ready,
+    Paused,
+    Failed(String),
+}
+
 fn run_tui(args: &Args) -> Result<(), String> {
     let mut guard =
         TerminalGuard::enter().map_err(|e| format!("could not start the terminal ui: {e}"))?;
@@ -283,7 +289,7 @@ fn run_tui(args: &Args) -> Result<(), String> {
     // cancelled workers keep running until they notice the flag. park their
     // handles here and reap them in the loop instead of freezing the ui.
     let mut retiring: Vec<worker::Handle> = Vec::new();
-    let mut downloader: Option<std::thread::JoinHandle<()>> = None;
+    let mut downloader: Option<std::thread::JoinHandle<DownloadOutcome>> = None;
     let mut download_rx: Option<Receiver<model::DownloadProgress>> = None;
     let mut download_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> = None;
 
@@ -298,80 +304,27 @@ fn run_tui(args: &Args) -> Result<(), String> {
         if let Some(drx) = &download_rx {
             while let Ok(p) = drx.try_recv() {
                 needs_redraw = true;
-                if p.bytes_per_sec < 0.0 {
-                    if p.bytes_per_sec == -2.0 {
-                        app.download = app::DownloadState::Idle;
-                        if app.download_discard {
-                            if let Some(info) = app
-                                .download_models
-                                .iter()
-                                .find(|info| info.file == app.download_file)
-                            {
-                                if let Err(e) = model::remove_partial(info) {
-                                    app.download_info = e.clone();
-                                    app.set_message(e);
-                                } else {
-                                    app.download_info =
-                                        "download canceled · partial file removed".into();
-                                    app.toast("download canceled", ToastKind::Warn);
-                                }
-                            }
-                            app.download_discard = false;
-                            app.download_paused = false;
-                        } else {
-                            app.download = app::DownloadState::Idle;
-                            app.download_paused = true;
-                            app.download_info = "paused · enter resumes from saved data".into();
-                            app.toast("download paused · enter resumes", ToastKind::Info);
-                        }
-                    } else {
-                        let err_path =
-                            model::cache_dir().join(format!(".{}.error", app.download_file));
-                        let msg = std::fs::read_to_string(&err_path).unwrap_or_else(|_| {
-                            "download failed, and the error note vanished".into()
-                        });
-                        let _ = std::fs::remove_file(&err_path);
-                        app.download = app::DownloadState::Failed;
-                        app.download_paused = false;
-                        app.download_info = msg.clone();
-                        app.toast(format!("download failed: {msg}"), ToastKind::Error);
-                        app.set_message(msg);
-                    }
-                } else {
-                    app.download_frac = p.fraction();
-                    if p.bytes_per_sec > 0.0 {
-                        app.download_info = format!(
-                            "{}/s eta {}",
-                            human_bytes(p.bytes_per_sec as u64),
-                            p.eta_s()
-                                .map(duration_short)
-                                .unwrap_or_else(|| "--:--".into())
-                        );
-                    }
+                app.download_frac = p.fraction();
+                if p.bytes_per_sec > 0.0 {
+                    app.download_info = format!(
+                        "{}/s eta {}",
+                        human_bytes(p.bytes_per_sec as u64),
+                        p.eta_s()
+                            .map(duration_short)
+                            .unwrap_or_else(|| "--:--".into())
+                    );
                 }
             }
         }
         if downloader.as_ref().is_some_and(|h| h.is_finished()) {
             if let Some(h) = downloader.take() {
-                let _ = h.join();
+                let outcome = h.join().unwrap_or_else(|_| {
+                    DownloadOutcome::Failed("download worker stopped unexpectedly".into())
+                });
+                finish_model_download(&mut app, outcome);
             }
             download_rx = None;
-            if app.download == app::DownloadState::Downloading {
-                app.download = app::DownloadState::Done;
-                app.download_paused = false;
-                app.download_frac = 1.0;
-                let label = app
-                    .download_models
-                    .iter()
-                    .find(|model| model.file == app.download_file)
-                    .map(|model| model.label)
-                    .unwrap_or("model");
-                app.toast(
-                    format!("{label} downloaded and verified"),
-                    ToastKind::Success,
-                );
-                app.set_message(format!("{label} is ready. press enter to select it"));
-            }
+            download_cancel = None;
             needs_redraw = true;
         }
 
@@ -516,7 +469,7 @@ fn process_key(
     tx: &mpsc::Sender<WorkerEvent>,
     handle: &mut Option<worker::Handle>,
     retiring: &mut Vec<worker::Handle>,
-    downloader: &mut Option<std::thread::JoinHandle<()>>,
+    downloader: &mut Option<std::thread::JoinHandle<DownloadOutcome>>,
     download_rx: &mut Option<Receiver<model::DownloadProgress>>,
     download_cancel: &mut Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     picker_rows: usize,
@@ -600,10 +553,10 @@ fn process_key(
                         if let Some(c) = download_cancel.take() {
                             c.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                        app.download_info = "pausing · saved data will resume on enter".into();
+                        app.download_info = "pausing Â· saved data will resume on enter".into();
                         app.download_paused = true;
                         app.toast(
-                            "download paused · enter resumes from saved data",
+                            "download paused Â· enter resumes from saved data",
                             ToastKind::Info,
                         );
                         // Closing the picker should not require waiting for the
@@ -619,7 +572,7 @@ fn process_key(
                     if let Some(c) = download_cancel.take() {
                         c.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                    app.download_info = "pausing · saved data will resume on enter".into();
+                    app.download_info = "pausing Â· saved data will resume on enter".into();
                     app.download_paused = true;
                 }
                 KeyCode::Char('c') if app.download == app::DownloadState::Downloading => {
@@ -628,7 +581,7 @@ fn process_key(
                     if let Some(c) = download_cancel.take() {
                         c.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                    app.download_info = "canceling · removing partial download".into();
+                    app.download_info = "canceling Â· removing partial download".into();
                 }
                 KeyCode::Char('x') => {
                     let info = &app.download_models[app.download_index];
@@ -932,9 +885,61 @@ fn change_setting(app: &mut App, forward: bool) {
     }
 }
 
+fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
+    match outcome {
+        DownloadOutcome::Ready => {
+            app.download = app::DownloadState::Done;
+            app.download_paused = false;
+            app.download_frac = 1.0;
+            let label = app
+                .download_models
+                .iter()
+                .find(|model| model.file == app.download_file)
+                .map(|model| model.label)
+                .unwrap_or("model");
+            app.toast(
+                format!("{label} downloaded and verified"),
+                ToastKind::Success,
+            );
+            app.set_message(format!("{label} is ready. press enter to select it"));
+        }
+        DownloadOutcome::Paused => {
+            app.download = app::DownloadState::Idle;
+            if app.download_discard {
+                if let Some(info) = app
+                    .download_models
+                    .iter()
+                    .find(|info| info.file == app.download_file)
+                {
+                    if let Err(err) = model::remove_partial(info) {
+                        app.download_info = err.clone();
+                        app.set_message(err);
+                    } else {
+                        app.download_info = "download canceled · partial file removed".into();
+                        app.toast("download canceled", ToastKind::Warn);
+                    }
+                }
+                app.download_discard = false;
+                app.download_paused = false;
+            } else {
+                app.download_paused = true;
+                app.download_info = "paused · enter resumes from saved data".into();
+                app.toast("download paused · enter resumes", ToastKind::Info);
+            }
+        }
+        DownloadOutcome::Failed(err) => {
+            app.download = app::DownloadState::Failed;
+            app.download_paused = false;
+            app.download_info = err.clone();
+            app.toast(format!("download failed: {err}"), ToastKind::Error);
+            app.set_message(err);
+        }
+    }
+}
+
 fn start_download(
     app: &mut App,
-    downloader: &mut Option<std::thread::JoinHandle<()>>,
+    downloader: &mut Option<std::thread::JoinHandle<DownloadOutcome>>,
     download_rx: &mut Option<Receiver<model::DownloadProgress>>,
     download_cancel: &mut Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) {
@@ -953,17 +958,6 @@ fn start_download(
             app.overlay = Overlay::None;
         }
         return;
-    }
-    // a finished thread still holding its slot must be reaped before a new
-    // download starts; otherwise the old join handle can look "live" for a
-    // frame and enter gets ignored right after a pause.
-    if let Some(h) = downloader.as_ref()
-        && h.is_finished()
-    {
-        if let Some(h) = downloader.take() {
-            let _ = h.join();
-        }
-        *download_rx = None;
     }
     if downloader.is_some() {
         let what = if app.download_paused {
@@ -996,22 +990,12 @@ fn start_download(
         let result = model::download(&info, &cancel_thread, |p| {
             let _ = p_tx.send(p);
         });
-        if let Err(e) = result {
-            if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) {
-                let _ = p_tx.send(model::DownloadProgress {
-                    downloaded: 0,
-                    total: None,
-                    bytes_per_sec: -2.0,
-                });
-            } else {
-                let _ =
-                    std::fs::write(model::cache_dir().join(format!(".{}.error", info.file)), &e);
-                let _ = p_tx.send(model::DownloadProgress {
-                    downloaded: 0,
-                    total: None,
-                    bytes_per_sec: -1.0,
-                });
+        match result {
+            Ok(_) => DownloadOutcome::Ready,
+            Err(_) if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) => {
+                DownloadOutcome::Paused
             }
+            Err(err) => DownloadOutcome::Failed(err),
         }
     });
     *download_cancel = Some(cancel);

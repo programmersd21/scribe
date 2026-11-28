@@ -2577,6 +2577,7 @@ version = "0.3.0"
 dependencies = [
  "crossterm",
  "ratatui",
+ "rustix",
  "sha2 0.11.1",
  "tokio",
  "unicode-width",
