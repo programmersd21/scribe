@@ -338,7 +338,10 @@ mod tests {
 
     #[test]
     fn cache_status_rejects_uninspectable_cache_paths() {
-        let dir = std::env::temp_dir().join(format!("scribe-doctor-uninspectable-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "scribe-doctor-uninspectable-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let parent = dir.join("not-a-directory");
