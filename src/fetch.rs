@@ -188,7 +188,10 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                 Ok(child) => child,
                 Err(e) => {
                     let cleanup = cleanup_fallback(&fallback, &direct);
-                    return Err(format!("could not download audio: {e}{}", cleanup_suffix(cleanup)));
+                    return Err(format!(
+                        "could not download audio: {e}{}",
+                        cleanup_suffix(cleanup)
+                    ));
                 }
             };
             let status = tokio::select! {
@@ -286,7 +289,10 @@ fn cleanup_paths(paths: &[&Path]) -> Result<(), String> {
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(format!("could not remove partial download(s): {}", failures.join("; ")))
+        Err(format!(
+            "could not remove partial download(s): {}",
+            failures.join("; ")
+        ))
     }
 }
 
@@ -363,7 +369,8 @@ mod tests {
 
     #[test]
     fn fallback_cleanup_reports_filesystem_failures() {
-        let dir = std::env::temp_dir().join(format!("scribe-fallback-error-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("scribe-fallback-error-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let fallback = dir.join("fallback.webm");
