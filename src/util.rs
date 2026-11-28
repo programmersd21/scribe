@@ -313,14 +313,14 @@ fn tilde_suffix(path: &str, windows: bool) -> Option<&str> {
     }
 }
 
-fn with_trailing_separator(home: PathBuf) -> PathBuf {
+fn with_trailing_separator(home: PathBuf, windows: bool) -> PathBuf {
     let mut value = home.into_os_string();
     let has_separator = {
         let text = value.to_string_lossy();
         text.ends_with('/') || text.ends_with('\\')
     };
     if !has_separator {
-        value.push(std::path::MAIN_SEPARATOR.to_string());
+        value.push(if windows { "\\" } else { "/" });
     }
     PathBuf::from(value)
 }
@@ -328,14 +328,14 @@ fn with_trailing_separator(home: PathBuf) -> PathBuf {
 fn expand_tilde_from(path: &str, home: Option<PathBuf>, windows: bool) -> PathBuf {
     if path == "~" {
         return home
-            .map(with_trailing_separator)
+            .map(|home| with_trailing_separator(home, windows))
             .unwrap_or_else(|| PathBuf::from("~"));
     }
     if let Some(rest) = tilde_suffix(path, windows)
         && let Some(home) = home
     {
         return if rest.is_empty() {
-            with_trailing_separator(home)
+            with_trailing_separator(home, windows)
         } else {
             home.join(rest)
         };
