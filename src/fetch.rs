@@ -231,9 +231,13 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
             let returned_cleanup = cleanup_paths(&[&path]);
             let detail = match returned_cleanup {
                 Ok(()) => error,
-                Err(returned_error) => format!("{error}; returned audio cleanup also failed: {returned_error}"),
+                Err(returned_error) => {
+                    format!("{error}; returned audio cleanup also failed: {returned_error}")
+                }
             };
-            return Err(format!("audio was downloaded but temporary-file cleanup failed: {detail}"));
+            return Err(format!(
+                "audio was downloaded but temporary-file cleanup failed: {detail}"
+            ));
         }
     }
 
