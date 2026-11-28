@@ -333,7 +333,7 @@ run the diagnostic command for a read-only report:
 scribe --doctor
 ```
 
-it checks dependencies, model integrity, paths and permissions. it does not install packages or modify files.
+it checks dependencies, model integrity and configured paths. it does not install packages or modify files, and it does not probe write permissions.
 
 ## performance and implementation
 
