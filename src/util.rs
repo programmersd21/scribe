@@ -72,12 +72,31 @@ pub fn parse_http_url(s: &str) -> Option<(String, String)> {
         return None;
     }
     let authority = rest.split(['/', '?', '#']).next()?;
-    let host = authority
-        .rsplit('@')
-        .next()?
-        .split(':')
-        .next()?
-        .trim_matches(['[', ']']);
+    let host_port = authority.rsplit('@').next()?;
+    let host = if let Some(bracketed) = host_port.strip_prefix('[') {
+        let (host, suffix) = bracketed.split_once(']')?;
+        host.parse::<std::net::Ipv6Addr>().ok()?;
+        if !suffix.is_empty() {
+            let port = suffix.strip_prefix(':')?;
+            if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            port.parse::<u16>().ok()?;
+        }
+        host
+    } else {
+        let (host, port) = match host_port.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host_port, None),
+        };
+        if let Some(port) = port {
+            if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            port.parse::<u16>().ok()?;
+        }
+        host
+    };
     if host.is_empty() || host.chars().any(|c| c.is_whitespace()) {
         return None;
     }
@@ -693,6 +712,11 @@ mod tests {
         assert!(!is_url("http:// "));
         assert!(is_url("https://example.com/a?b=c#d"));
         assert!(is_url("http://user:pass@example.com:8080/a"));
+        assert!(is_url("http://[::1]/audio.wav"));
+        assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
+        assert!(!is_url("http://[not-ip]/audio.wav"));
+        assert!(!is_url("http://example.com:bad/audio.wav"));
+        assert!(!is_url("http://example.com:/audio.wav"));
     }
 
     #[test]
