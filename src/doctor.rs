@@ -27,17 +27,25 @@ struct Row {
 
 fn cache_status(cache: &std::path::Path) -> (Verdict, &'static str) {
     if cache.is_dir() {
-        (Verdict::Ok, "directory exists; write access not tested")
-    } else if cache.exists() {
-        (Verdict::Fail, "path exists but is not a directory")
-    } else if cache.parent().is_some_and(std::path::Path::is_dir) {
-        (
-            Verdict::Warn,
-            "will be created on first download; write access not tested",
-        )
-    } else {
-        (Verdict::Fail, "parent directory is missing")
+        return (Verdict::Ok, "directory exists; write access not tested");
     }
+    if std::fs::symlink_metadata(cache).is_ok() {
+        return (Verdict::Fail, "path exists but is not a usable directory");
+    }
+    for ancestor in cache.ancestors().skip(1) {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.is_dir() => {
+                return (
+                    Verdict::Warn,
+                    "will be created on first download; write access not tested",
+                );
+            }
+            Ok(_) => return (Verdict::Fail, "an ancestor is not a directory"),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return (Verdict::Fail, "cannot inspect cache path"),
+        }
+    }
+    (Verdict::Fail, "no existing parent directory")
 }
 
 fn version(binary: &std::path::Path, args: &[&str]) -> Option<String> {
@@ -316,6 +324,36 @@ mod tests {
             (Verdict::Fail, "path exists but is not a directory")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cache_status_rejects_dangling_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("models");
+        symlink(dir.join("missing"), &cache).unwrap();
+        assert_eq!(
+            cache_status(&cache),
+            (Verdict::Fail, "path exists but is not a usable directory")
+        );
+        std::fs::remove_file(&cache).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn cache_status_accepts_missing_parent_trees() {
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-nested-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache = dir.join("one").join("two").join("models");
+        assert_eq!(
+            cache_status(&cache),
+            (
+                Verdict::Warn,
+                "will be created on first download; write access not tested"
+            )
+        );
     }
 
     #[test]
