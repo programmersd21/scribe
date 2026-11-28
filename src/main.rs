@@ -209,6 +209,9 @@ fn collect_plain_segments(
             WorkerEventKind::Segment(segment) => segments.push(segment),
             WorkerEventKind::Done => return Ok(segments),
             WorkerEventKind::Cancelled => return Err("transcription cancelled".into()),
+            WorkerEventKind::CancelledWithWarning(message) => {
+                return Err(format!("transcription cancelled; {message}"));
+            }
             WorkerEventKind::Error(error) => return Err(error),
             _ => {}
         }
@@ -336,7 +339,10 @@ fn run_tui(args: &Args) -> Result<(), String> {
             }
             let terminal = matches!(
                 ev.kind,
-                WorkerEventKind::Done | WorkerEventKind::Cancelled | WorkerEventKind::Error(_)
+                WorkerEventKind::Done
+                    | WorkerEventKind::Cancelled
+                    | WorkerEventKind::CancelledWithWarning(_)
+                    | WorkerEventKind::Error(_)
             );
             needs_redraw = true;
             app.accept_event(ev);
