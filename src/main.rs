@@ -889,6 +889,29 @@ fn change_setting(app: &mut App, forward: bool) {
 fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
+            if app.download_discard {
+                let result = app
+                    .download_models
+                    .iter()
+                    .find(|model| model.file == app.download_file)
+                    .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
+                    .and_then(model::remove_model);
+                app.download_discard = false;
+                app.download_paused = false;
+                match result {
+                    Ok(()) => {
+                        app.download = app::DownloadState::Idle;
+                        app.download_info = "download canceled · completed file removed".into();
+                        app.toast("download canceled", ToastKind::Warn);
+                    }
+                    Err(err) => {
+                        app.download = app::DownloadState::Failed;
+                        app.download_info = err.clone();
+                        app.set_message(err);
+                    }
+                }
+                return;
+            }
             app.download = app::DownloadState::Done;
             app.download_paused = false;
             app.download_frac = 1.0;
@@ -1080,6 +1103,33 @@ mod tests {
 
         let failed = collect_plain_segments([WorkerEventKind::Error("decoder failed".into())]);
         assert_eq!(failed.unwrap_err(), "decoder failed");
+    }
+
+    #[test]
+    fn cancel_after_download_commit_removes_the_completed_model() {
+        let dir = std::env::temp_dir().join(format!("scribe-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+
+        let info = crate::model::find("tiny").unwrap();
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"completed model").unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.download_models = crate::model::CATALOG.to_vec();
+        app.download_file = info.file.to_string();
+        app.download_discard = true;
+        app.download_paused = true;
+
+        finish_model_download(&mut app, DownloadOutcome::Ready);
+
+        assert!(!path.exists());
+        assert!(!app.download_discard);
+        assert!(!app.download_paused);
+        assert_eq!(app.download, app::DownloadState::Idle);
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

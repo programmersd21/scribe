@@ -424,6 +424,11 @@ thread_local! {
     static TEST_CACHE_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(test)]
+pub(crate) fn set_test_cache_dir(dir: Option<PathBuf>) {
+    TEST_CACHE_DIR.with(|cache| *cache.borrow_mut() = dir);
+}
+
 /// What a `--model`/saved value can refer to. Keeping the three forms distinct
 /// is what makes resolution unambiguous: a catalog name is never also treated
 /// as a path just because a file with that name happens to exist in `$PWD`.
