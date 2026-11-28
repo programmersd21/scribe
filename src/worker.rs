@@ -1060,9 +1060,13 @@ mod tests {
         tx.try_send(Chunk::Samples(vec![0.0])).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let reader_cancel = cancel.clone();
+        let (full_tx, full_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
         let reader = thread::spawn(move || {
-            let sent = send_chunk(&tx, Chunk::Samples(vec![1.0]), &reader_cancel);
-            assert!(!sent);
+            let sent = send_chunk_with(&tx, Chunk::Samples(vec![1.0]), &reader_cancel, || {
+                let _ = full_tx.send(());
+            });
+            done_tx.send(sent).unwrap();
             0
         });
         let ingest = Ingest {
@@ -1073,8 +1077,11 @@ mod tests {
             finished: false,
         };
 
+        full_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
         let dropper = thread::spawn(move || drop(ingest));
         dropper.join().unwrap();
+        assert!(!done_rx.recv_timeout(Duration::from_secs(1)).unwrap());
     }
 
     #[cfg(unix)]
