@@ -519,18 +519,22 @@ fn is_windows_unc_path(input: &str, windows: bool) -> bool {
 }
 
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
+    complete_path_with(input, cfg!(windows))
+}
+
+fn complete_path_with(input: &str, windows: bool) -> Vec<CompletionCandidate> {
     let raw = if input.starts_with('~') {
-        expand_tilde(input)
+        expand_tilde_from(input, home_dir(), windows)
     } else {
         PathBuf::from(input)
     };
     let text = raw.to_string_lossy().to_string();
-    if is_windows_unc_path(&text, cfg!(windows)) {
+    if is_windows_unc_path(&text, windows) {
         return Vec::new();
     }
-    let (dir, prefix) = split_completion_path(&text, cfg!(windows));
+    let (dir, prefix) = split_completion_path(&text, windows);
     let scan = if dir.is_empty() { "." } else { dir };
-    let scan = expand_tilde(scan);
+    let scan = expand_tilde_from(scan, home_dir(), windows);
     let mut out: Vec<CompletionCandidate> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&scan) {
         let mut found: Vec<CompletionCandidate> = entries
@@ -1011,6 +1015,21 @@ mod tests {
         let input = format!("{}\\record", dir.display());
         let candidates = complete_path(&input);
         assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn complete_path_uses_windows_separator_mode_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("scribe-cmpl-win-mode-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("recording.wav"), b"x").unwrap();
+
+        let input = format!("{}/record", dir.display());
+        let candidates = complete_path_with(&input, true);
+
+        assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
+        assert!(complete_path_with(r"\\\\server\\share", true).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
