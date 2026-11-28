@@ -822,15 +822,14 @@ mod tests {
         assert!(is_url("http://[fe80::1%25eth0]/audio.wav"));
         assert!(is_url("http://[fe80::1%25eth0]:8080/audio.wav"));
         assert!(is_url("http://[v1.example]/audio.wav"));
-        assert!(is_url("http://[Vf.a:b!        assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
-        assert!(!is_url("http://[not-ip]/audio.wav"));'()*+,;=]/audio.wav"));
+        assert!(is_url("http://[Vf.a:b!        assert!(is_url("http://[Vf.a:b!        assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
+        assert!(!is_url("http://[not-ip]/audio.wav"));'()*+,;=]/audio.wav"));'()*+,;=]/audio.wav"));
         assert!(!is_url("http://[fe80::1%25]/audio.wav"));
         assert!(!is_url("http://[fe80::1%25bad%xx]/audio.wav"));
         assert!(!is_url("http://[fe80::1%25eth0%zz]/audio.wav"));
         assert!(!is_url("http://[fe80::1%25eth0]:99999/audio.wav"));
         assert!(!is_url("http://[v.example]/audio.wav"));
         assert!(!is_url("http://[v1.]/audio.wav"));
-        assert!(!is_url("http://[not-ip]/audio.wav"));
         assert!(!is_url("http://example.com:bad/audio.wav"));
         assert!(!is_url("http://example.com:/audio.wav"));
     }
