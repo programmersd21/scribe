@@ -44,7 +44,7 @@ yt-dlp = { version = "2.10.0", default-features = false, features = ["cache-json
 # minimal tokio for the current-thread runtime used by the yt-dlp wrapper.
 tokio = { version = "1.54.1", features = ["rt", "fs", "process", "time", "sync"] }
 # sha256 verification of downloaded model files against the upstream table.
-sha2 = "0.11.1"
+sha2 = "0.11.2"
 # locate ffprobe on path; used by the duration detector in worker.rs.
 which = "8"
 
