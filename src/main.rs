@@ -1221,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn discard_clears_relative_managed_model_selection() {
+    fn discard_clears_equivalent_managed_model_selection() {
         let info = crate::model::find("tiny").unwrap();
         let dir = std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1229,9 +1229,12 @@ mod tests {
         crate::model::set_test_cache_dir(Some(dir.clone()));
         let path = dir.join(info.file);
         std::fs::write(&path, b"model").unwrap();
-        let relative = std::env::current_dir().unwrap().join(&path);
+        let alias = dir
+            .join("..")
+            .join(dir.file_name().unwrap())
+            .join(info.file);
         let mut app = App::new(&crate::cli::Args::default());
-        app.model_name = relative.to_string_lossy().replace("/./", "/");
+        app.model_name = alias.to_string_lossy().into_owned();
         app.model_label = info.label.to_string();
         std::fs::remove_file(&path).unwrap();
 
