@@ -823,7 +823,10 @@ mod tests {
 
     #[test]
     fn completion_path_splits_native_and_windows_separators() {
-        assert_eq!(split_completion_path("/home/user/rec", false), ("/home/user/", "rec"));
+        assert_eq!(
+            split_completion_path("/home/user/rec", false),
+            ("/home/user/", "rec")
+        );
         assert_eq!(
             split_completion_path("C:\\Users\\user\\rec", true),
             ("C:\\Users\\user\\", "rec")
