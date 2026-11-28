@@ -553,10 +553,10 @@ fn process_key(
                         if let Some(c) = download_cancel.take() {
                             c.store(true, std::sync::atomic::Ordering::Relaxed);
                         }
-                        app.download_info = "pausing Â· saved data will resume on enter".into();
+                        app.download_info = "pausing · saved data will resume on enter".into();
                         app.download_paused = true;
                         app.toast(
-                            "download paused Â· enter resumes from saved data",
+                            "download paused · enter resumes from saved data",
                             ToastKind::Info,
                         );
                         // Closing the picker should not require waiting for the
@@ -572,7 +572,7 @@ fn process_key(
                     if let Some(c) = download_cancel.take() {
                         c.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                    app.download_info = "pausing Â· saved data will resume on enter".into();
+                    app.download_info = "pausing · saved data will resume on enter".into();
                     app.download_paused = true;
                 }
                 KeyCode::Char('c') if app.download == app::DownloadState::Downloading => {
@@ -581,7 +581,7 @@ fn process_key(
                     if let Some(c) = download_cancel.take() {
                         c.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
-                    app.download_info = "canceling Â· removing partial download".into();
+                    app.download_info = "canceling · removing partial download".into();
                 }
                 KeyCode::Char('x') => {
                     let info = &app.download_models[app.download_index];
