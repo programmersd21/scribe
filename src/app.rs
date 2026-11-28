@@ -341,6 +341,7 @@ impl App {
             WorkerEventKind::Segment(s) => self.on_segment(s),
             WorkerEventKind::Done => self.on_done(),
             WorkerEventKind::Cancelled => self.on_cancelled(),
+            WorkerEventKind::CancelledWithWarning(message) => self.on_cancelled_with_warning(message),
             WorkerEventKind::Error(e) => self.on_error(e),
         }
         true
@@ -465,6 +466,12 @@ impl App {
             "hit the brakes early. saved {} segments before pulling over. hit e to export",
             self.segments.len()
         ));
+    }
+
+    pub fn on_cancelled_with_warning(&mut self, message: String) {
+        self.on_cancelled();
+        self.set_message(format!("cancelled, but cleanup failed: {message}"));
+        self.overlay = Overlay::Message;
     }
 
     pub fn on_error(&mut self, message: String) {
