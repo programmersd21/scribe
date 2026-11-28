@@ -98,10 +98,12 @@ fn valid_ipvfuture(host: &str) -> bool {
     !version.is_empty()
         && version.bytes().all(|byte| byte.is_ascii_hexdigit())
         && !address.is_empty()
-        && address.bytes().all(|byte| {
+        && address
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~!        && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
                 || b"-._~!$&'()*+,;=:".contains(&byte)
-        })
+        })'()*+,;=:".contains(&byte))
 }
 
 fn valid_bracketed_host(host: &str) -> bool {
@@ -520,8 +522,14 @@ fn split_completion_path(input: &str, windows: bool) -> (&str, &str) {
 
 fn is_windows_unc_path(input: &str, windows: bool) -> bool {
     windows
-        && input.as_bytes().get(0).is_some_and(|byte| *byte == b'/' || *byte == b'\\')
-        && input.as_bytes().get(1).is_some_and(|byte| *byte == b'/' || *byte == b'\\')
+        && input
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| *byte == b'/' || *byte == b'\\')
+        && input
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| *byte == b'/' || *byte == b'\\')
 }
 
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
@@ -827,7 +835,9 @@ mod tests {
         assert!(is_url("http://[fe80::1%25eth0]/audio.wav"));
         assert!(is_url("http://[fe80::1%25eth0]:8080/audio.wav"));
         assert_eq!(
-            parse_http_url("http://[fe80::1%25Eth0]/audio.wav").unwrap().1,
+            parse_http_url("http://[fe80::1%25Eth0]/audio.wav")
+                .unwrap()
+                .1,
             "fe80::1%25Eth0"
         );
         assert!(is_url("http://[v1.example]/audio.wav"));
@@ -1011,6 +1021,7 @@ mod tests {
         assert!(is_windows_unc_path("\\\\server\\share", true));
         assert!(is_windows_unc_path("//server/share", true));
         assert!(is_windows_unc_path(r"/\\server/share", true));
+        assert!(is_windows_unc_path(r"\/server/share", true));
         assert!(is_windows_unc_path(r"\//server/share", true));
         assert!(!is_windows_unc_path("C:\\Users\\person", true));
         assert!(!is_windows_unc_path("\\\\server\\share", false));
@@ -1042,7 +1053,11 @@ mod tests {
         let input = format!("{}/record", dir.display());
         let candidates = complete_path_with(&input, true);
 
-        assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.value.ends_with("recording.wav"))
+        );
         assert!(complete_path_with(r"\\\\server\\share", true).is_empty());
         assert!(complete_path_with(r"/\\server/share", true).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
