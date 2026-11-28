@@ -451,8 +451,18 @@ fn split_completion_path(input: &str, windows: bool) -> (&str, &str) {
     };
     match separator {
         Some(i) => (&input[..=i], &input[i + 1..]),
+        None if windows
+            && input.as_bytes().get(1) == Some(&b':')
+            && input.as_bytes()[0].is_ascii_alphabetic() =>
+        {
+            (&input[..2], &input[2..])
+        }
         None => ("", input),
     }
+}
+
+fn is_windows_unc_path(input: &str, windows: bool) -> bool {
+    windows && (input.starts_with("\\\\") || input.starts_with("//"))
 }
 
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
@@ -462,6 +472,9 @@ pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
         PathBuf::from(input)
     };
     let text = raw.to_string_lossy().to_string();
+    if is_windows_unc_path(&text, cfg!(windows)) {
+        return Vec::new();
+    }
     let (dir, prefix) = split_completion_path(&text, cfg!(windows));
     let scan = if dir.is_empty() { "." } else { dir };
     let scan = expand_tilde(scan);
@@ -917,6 +930,24 @@ mod tests {
             split_completion_path("C:/Users/user/rec", true),
             ("C:/Users/user/", "rec")
         );
+        assert_eq!(split_completion_path("C:rec", true), ("C:", "rec"));
+        assert_eq!(split_completion_path("C:", true), ("C:", ""));
+        assert!(is_windows_unc_path("\\\\server\\share", true));
+        assert!(is_windows_unc_path("//server/share", true));
+        assert!(!is_windows_unc_path("C:\\Users\\person", true));
+        assert!(!is_windows_unc_path("\\\\server\\share", false));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn complete_path_uses_windows_separators_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("scribe-win-cmpl-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("recording.wav"), b"x").unwrap();
+        let input = format!("{}\\record", dir.display());
+        let candidates = complete_path(&input);
+        assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
