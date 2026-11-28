@@ -1001,7 +1001,8 @@ mod tests {
             chunk_tx,
             Arc::new(AtomicBool::new(false)),
             children.clone(),
-        );
+        )
+        .unwrap();
         let mut samples = 0;
         while let Ok(chunk) = chunk_rx.recv() {
             if let Chunk::Samples(s) = chunk {
@@ -1031,7 +1032,8 @@ mod tests {
             chunk_tx,
             Arc::new(AtomicBool::new(false)),
             children.clone(),
-        );
+        )
+        .unwrap();
         drop(chunk_rx);
         let (total, detail) = ingest.finish();
         assert_eq!(total, 1);
