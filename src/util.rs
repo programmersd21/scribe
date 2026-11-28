@@ -100,10 +100,7 @@ fn valid_ipvfuture(host: &str) -> bool {
         && !address.is_empty()
         && address
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~!        && address.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || b"-._~!$&'()*+,;=:".contains(&byte)
-        })'()*+,;=:".contains(&byte))
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=:".contains(&byte))
 }
 
 fn valid_bracketed_host(host: &str) -> bool {
