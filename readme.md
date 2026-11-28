@@ -77,7 +77,7 @@ no account. no GPU. no subscription. no telemetry.
 
 ### cargo
 
-requires Rust 1.90 or later, plus the native build prerequisites below.
+requires Rust 1.100 or later, plus the native build prerequisites below.
 
 ```sh
 cargo install scribe-tui
@@ -109,7 +109,7 @@ each release includes `SHA256SUMS` for verifying downloaded binaries.
 
 | requirement | when it is needed |
 |:--|:--|
-| Rust 1.90 or later | building from source |
+| Rust 1.100 or later | building from source |
 | C/C++ compiler, CMake and libclang | compiling whisper-rs |
 | FFmpeg | decoding local audio and video |
 | network access | first model download and URL input |
@@ -401,7 +401,7 @@ cargo test --locked --all-targets --all-features
 cargo check --locked --all-targets
 ```
 
-CI checks formatting, Clippy, tests, CLI smoke behaviour and the Rust 1.90 minimum supported version. release builds target the three platforms listed above.
+CI checks formatting, Clippy, tests, CLI smoke behaviour and the Rust 1.100 minimum supported version. release builds target the three platforms listed above.
 
 ## dependencies
 

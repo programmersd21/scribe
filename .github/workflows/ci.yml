@@ -48,7 +48,7 @@ jobs:
           cargo run --locked --quiet -- --help >/dev/null
 
   msrv:
-    name: msrv (1.90)
+    name: msrv (1.100)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -57,7 +57,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.90.0"
+          toolchain: "1.100.0"
 
       - uses: Swatinem/rust-cache@v2
 
