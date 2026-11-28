@@ -938,19 +938,26 @@ fn normalized_path(path: &std::path::Path) -> std::path::PathBuf {
     normalized
 }
 
+fn paths_equal(left: &std::path::Path, right: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
 fn selected_model_matches_managed(app: &App, file: &str) -> bool {
     let managed = model::cache_dir().join(file);
     let selected = std::path::Path::new(&app.model_name);
     if selected.as_os_str().is_empty() {
         return false;
     }
-    match (
-        std::fs::canonicalize(selected),
-        std::fs::canonicalize(&managed),
-    ) {
-        (Ok(selected), Ok(managed)) => selected == managed,
-        _ => normalized_path(selected) == normalized_path(&managed),
-    }
+    let selected = std::fs::canonicalize(selected).unwrap_or_else(|_| normalized_path(selected));
+    let managed = std::fs::canonicalize(&managed).unwrap_or_else(|_| normalized_path(&managed));
+    paths_equal(&selected, &managed)
 }
 
 fn clear_discarded_model_selection(app: &mut App, file: &str, selected_managed: bool) {
@@ -1264,6 +1271,32 @@ mod tests {
             .join(info.file);
         let mut app = App::new(&crate::cli::Args::default());
         app.model_name = alias.to_string_lossy().into_owned();
+        app.model_label = info.label.to_string();
+        let selected_managed = selected_model_matches_managed(&app, info.file);
+        assert!(selected_managed);
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file, selected_managed);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn discard_clears_case_insensitive_managed_model_selection() {
+        let info = crate::model::find("tiny").unwrap();
+        let dir = std::env::temp_dir().join(format!("scribe-case-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"model").unwrap();
+
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = path.to_string_lossy().to_uppercase();
         app.model_label = info.label.to_string();
         let selected_managed = selected_model_matches_managed(&app, info.file);
         assert!(selected_managed);
