@@ -90,8 +90,10 @@ impl Handle {
     }
 
     pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-        kill_all(&self.children);
+        if !self.finished {
+            self.cancel.store(true, Ordering::Relaxed);
+            kill_all(&self.children);
+        }
     }
 
     /// suspend inference without killing the decoder. the worker parks itself
@@ -432,6 +434,7 @@ struct Ingest {
     diagnostics: Option<thread::JoinHandle<Vec<u8>>>,
     children: Children,
     cancel: Arc<AtomicBool>,
+    finished: bool,
 }
 
 impl Ingest {
@@ -444,6 +447,7 @@ impl Ingest {
             .take()
             .and_then(|h| h.join().ok())
             .unwrap_or_default();
+        self.finished = true;
         (total, first_line(&tail))
     }
 }
@@ -551,6 +555,7 @@ fn spawn_ingest(
         diagnostics: Some(diagnostics),
         children,
         cancel,
+        finished: false,
     })
 }
 
