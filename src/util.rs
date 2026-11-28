@@ -88,7 +88,8 @@ fn valid_zone_id(zone: &str) -> bool {
 }
 
 fn valid_ipvfuture(host: &str) -> bool {
-    let Some(versioned) = host.strip_prefix(['v', 'V']) else {
+    let versioned = host.strip_prefix('v').or_else(|| host.strip_prefix('V'));
+    let Some(versioned) = versioned else {
         return false;
     };
     let Some((version, address)) = versioned.split_once('.') else {
@@ -99,26 +100,8 @@ fn valid_ipvfuture(host: &str) -> bool {
         && !address.is_empty()
         && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
-                || b"-._~!pub fn parse_http_url(s: &str) -> Option<(String, String)> {
-    let s = s.trim();
-    let (scheme, rest) = s.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return None;
-    }
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let host_port = authority.rsplit('@').next()?;
-    let host = if let Some(bracketed) = host_port.strip_prefix('[') {
-        let (host, suffix) = bracketed.split_once(']')?;
-        host.parse::<std::net::Ipv6Addr>().ok()?;
-        if !suffix.is_empty() {
-            let port = suffix.strip_prefix(':')?;
-            if port.is_empty() || !port.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
-            }
-            port.parse::<u16>().ok()?;
-        }
-        host
-    } else {'()*+,;=:".contains(&byte)
+                || b"-._~!$&()*+,;=:".contains(&byte)
+                || byte == 39
         })
 }
 
