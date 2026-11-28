@@ -327,7 +327,9 @@ fn with_trailing_separator(home: PathBuf) -> PathBuf {
 
 fn expand_tilde_from(path: &str, home: Option<PathBuf>, windows: bool) -> PathBuf {
     if path == "~" {
-        return home.unwrap_or_else(|| PathBuf::from("~"));
+        return home
+            .map(with_trailing_separator)
+            .unwrap_or_else(|| PathBuf::from("~"));
     }
     if let Some(rest) = tilde_suffix(path, windows)
         && let Some(home) = home
@@ -803,6 +805,9 @@ mod tests {
         let (dir, prefix) = split_completion_path(&expanded.to_string_lossy(), true);
         assert_eq!(dir, "C:\\Users\\person\\");
         assert_eq!(prefix, "");
+
+        let expanded = expand_tilde_from("~", Some(PathBuf::from("C:\\Users\\person")), true);
+        assert_eq!(expanded.to_string_lossy(), "C:\\Users\\person\\");
     }
 
     #[test]
