@@ -919,10 +919,31 @@ fn remove_discarded_partial(info: &model::ModelInfo) -> Result<(), String> {
     retry_cache_removal(|| model::remove_partial(info))
 }
 
+fn normalized_path(path: &std::path::Path) -> std::path::PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(path)
+    };
+    let mut normalized = std::path::PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
 fn clear_discarded_model_selection(app: &mut App, file: &str) {
     let path = model::cache_dir().join(file);
-    let selected_path = path.to_string_lossy().into_owned();
-    if !path.exists() && app.model_name == selected_path {
+    let selected = normalized_path(std::path::Path::new(&app.model_name));
+    if !path.exists() && selected == normalized_path(&path) {
         app.model_name.clear();
         app.model_label = "-".into();
     }
@@ -1195,6 +1216,29 @@ mod tests {
         assert!(!app.download_discard);
         assert!(!app.download_paused);
         assert_eq!(app.download, app::DownloadState::Idle);
+        crate::model::set_test_cache_dir(None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discard_clears_relative_managed_model_selection() {
+        let info = crate::model::find("tiny").unwrap();
+        let dir = std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::model::set_test_cache_dir(Some(dir.clone()));
+        let path = dir.join(info.file);
+        std::fs::write(&path, b"model").unwrap();
+        let relative = std::env::current_dir().unwrap().join(&path);
+        let mut app = App::new(&crate::cli::Args::default());
+        app.model_name = relative.to_string_lossy().replace("/./", "/");
+        app.model_label = info.label.to_string();
+        std::fs::remove_file(&path).unwrap();
+
+        clear_discarded_model_selection(&mut app, info.file);
+
+        assert!(app.model_name.is_empty());
+        assert_eq!(app.model_label, "-");
         crate::model::set_test_cache_dir(None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
