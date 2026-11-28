@@ -886,6 +886,21 @@ fn change_setting(app: &mut App, forward: bool) {
     }
 }
 
+fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
+    let mut last_error = String::new();
+    for attempt in 0..5 {
+        match model::remove_model(info) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.contains("another scribe is using the model cache") && attempt < 4 => {
+                last_error = error;
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error)
+}
+
 fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
     match outcome {
         DownloadOutcome::Ready => {
@@ -895,7 +910,11 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .iter()
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
-                    .and_then(model::remove_model);
+                    .and_then(remove_discarded_model);
+                if result.is_ok() && app.model_name.ends_with(&app.download_file) {
+                    app.model_name.clear();
+                    app.model_label = "-".into();
+                }
                 app.download_discard = false;
                 app.download_paused = false;
                 match result {
@@ -970,6 +989,10 @@ fn start_download(
     let Some(info) = app.download_models.get(app.download_index).cloned() else {
         return;
     };
+    if downloader.is_some() && info.file == app.download_file {
+        app.set_message("download in progress (press c or esc to pause)");
+        return;
+    }
     let cached = model::cache_dir().join(info.file);
     if cached.is_file() {
         if let Err(e) = model::validate_cached(&info, &cached) {
@@ -987,7 +1010,7 @@ fn start_download(
         let what = if app.download_paused {
             "previous download is still stopping; press enter again in a moment"
         } else {
-            "download in progress (press c or esc to pause)"
+            "another download is in progress"
         };
         app.set_message(what);
         return;
