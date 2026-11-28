@@ -506,8 +506,11 @@ fn spawn_ingest(
                     Ok(n) => n,
                     Err(e) => {
                         if !cancel.load(Ordering::Relaxed) {
-                            let _ = tx
-                                .send(Chunk::Failed(format!("could not read decoded audio: {e}")));
+                            let _ = send_chunk(
+                                &tx,
+                                Chunk::Failed(format!("could not read decoded audio: {e}")),
+                                &cancel,
+                            );
                         }
                         return total;
                     }
