@@ -892,9 +892,7 @@ fn change_setting(app: &mut App, forward: bool) {
     }
 }
 
-fn retry_cache_removal(
-    mut remove: impl FnMut() -> Result<(), String>,
-) -> Result<(), String> {
+fn retry_cache_removal(mut remove: impl FnMut() -> Result<(), String>) -> Result<(), String> {
     let mut last_error = String::new();
     for attempt in 0..5 {
         match remove() {
@@ -1223,7 +1221,8 @@ mod tests {
     #[test]
     fn discard_clears_equivalent_managed_model_selection() {
         let info = crate::model::find("tiny").unwrap();
-        let dir = std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("scribe-relative-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         crate::model::set_test_cache_dir(Some(dir.clone()));
