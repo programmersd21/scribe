@@ -99,11 +99,18 @@ fn valid_ipvfuture(host: &str) -> bool {
         && version.bytes().all(|byte| byte.is_ascii_hexdigit())
         && !address.is_empty()
         && address.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || b"-._~!    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !address.is_empty()
+        && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || b"-._~!        && address.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
                 || b"-._~!$&()*+,;=:".contains(&byte)
                 || byte == 39
         })()*+,;=:".contains(&byte) || byte == 39
+        })()*+,;=:".contains(&byte)
+                || byte == b'\''
         })
 }
 
@@ -155,7 +162,12 @@ pub fn parse_http_url(s: &str) -> Option<(String, String)> {
     if host.is_empty() || host.chars().any(|c| c.is_whitespace()) {
         return None;
     }
-    Some((scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
+    let normalized_host = if let Some((address, zone)) = host.split_once("%25") {
+        format!("{}%25{zone}", address.to_ascii_lowercase())
+    } else {
+        host.to_ascii_lowercase()
+    };
+    Some((scheme.to_ascii_lowercase(), normalized_host))
 }
 
 fn host_matches(url: &str, hosts: &[&str]) -> bool {
@@ -517,7 +529,9 @@ fn split_completion_path(input: &str, windows: bool) -> (&str, &str) {
 }
 
 fn is_windows_unc_path(input: &str, windows: bool) -> bool {
-    windows && (input.starts_with("\\\\") || input.starts_with("//"))
+    windows
+        && input.as_bytes().get(0).is_some_and(|byte| *byte == b'/' || *byte == b'\\')
+        && input.as_bytes().get(1).is_some_and(|byte| *byte == b'/' || *byte == b'\\')
 }
 
 pub fn complete_path(input: &str) -> Vec<CompletionCandidate> {
@@ -822,6 +836,10 @@ mod tests {
         assert!(is_url("https://[2001:db8::1]:8443/audio.wav"));
         assert!(is_url("http://[fe80::1%25eth0]/audio.wav"));
         assert!(is_url("http://[fe80::1%25eth0]:8080/audio.wav"));
+        assert_eq!(
+            parse_http_url("http://[fe80::1%25Eth0]/audio.wav").unwrap().1,
+            "fe80::1%25Eth0"
+        );
         assert!(is_url("http://[v1.example]/audio.wav"));
         assert!(is_url("http://[Vf.a:b!$&'()*+,;=]/audio.wav"));
         assert!(!is_url("http://[not-ip]/audio.wav"));
@@ -1002,6 +1020,8 @@ mod tests {
         assert_eq!(split_completion_path("C:", true), ("C:", ""));
         assert!(is_windows_unc_path("\\\\server\\share", true));
         assert!(is_windows_unc_path("//server/share", true));
+        assert!(is_windows_unc_path(r"/\\server/share", true));
+        assert!(is_windows_unc_path(r"\//server/share", true));
         assert!(!is_windows_unc_path("C:\\Users\\person", true));
         assert!(!is_windows_unc_path("\\\\server\\share", false));
     }
@@ -1034,6 +1054,7 @@ mod tests {
 
         assert!(candidates.iter().any(|candidate| candidate.value.ends_with("recording.wav")));
         assert!(complete_path_with(r"\\\\server\\share", true).is_empty());
+        assert!(complete_path_with(r"/\\server/share", true).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
