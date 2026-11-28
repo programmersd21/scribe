@@ -301,8 +301,13 @@ pub fn home_dir() -> Option<PathBuf> {
 /// expand `~` ourselves. the shell is not involved when a user pastes a path
 /// into a text box, so somebody has to do it.
 fn tilde_suffix(path: &str, windows: bool) -> Option<&str> {
-    path.strip_prefix("~/")
-        .or_else(|| if windows { path.strip_prefix("~\\") } else { None })
+    path.strip_prefix("~/").or_else(|| {
+        if windows {
+            path.strip_prefix("~\\")
+        } else {
+            None
+        }
+    })
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {
