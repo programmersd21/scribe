@@ -64,9 +64,7 @@ impl Preferences {
             };
             let value = unescape(value);
             match key.trim() {
-                "model" if !value.trim().is_empty() => {
-                    prefs.model = Some(value.trim().to_string())
-                }
+                "model" if !value.trim().is_empty() => prefs.model = Some(value.trim().to_string()),
                 "threads" => {
                     if let Ok(n) = value.trim().parse::<i32>()
                         && (1..=256).contains(&n)
@@ -74,14 +72,10 @@ impl Preferences {
                         prefs.threads = Some(n);
                     }
                 }
-                "lang" if !value.trim().is_empty() => {
-                    prefs.lang = Some(value.trim().to_string())
-                }
+                "lang" if !value.trim().is_empty() => prefs.lang = Some(value.trim().to_string()),
                 "out" if !value.is_empty() => prefs.out = Some(value),
                 "format" => prefs.format = Format::parse(&value),
-                "theme" if !value.trim().is_empty() => {
-                    prefs.theme = Some(value.trim().to_string())
-                }
+                "theme" if !value.trim().is_empty() => prefs.theme = Some(value.trim().to_string()),
                 "translate" => prefs.translate = value.trim().parse::<bool>().ok(),
                 _ => {}
             }
