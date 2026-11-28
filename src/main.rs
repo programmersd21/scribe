@@ -903,7 +903,8 @@ fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
 
 fn clear_discarded_model_selection(app: &mut App, file: &str) {
     let path = model::cache_dir().join(file);
-    if !path.exists() && app.model_name == path.to_string_lossy() {
+    let selected_path = path.to_string_lossy().into_owned();
+    if !path.exists() && app.model_name == selected_path {
         app.model_name.clear();
         app.model_label = "-".into();
     }
@@ -1174,7 +1175,7 @@ mod tests {
 
         clear_discarded_model_selection(&mut app, info.file);
 
-        assert_eq!(app.model_name, custom.to_string_lossy());
+        assert_eq!(app.model_name, custom.to_string_lossy().into_owned());
         assert_eq!(app.model_label, "custom");
     }
 
