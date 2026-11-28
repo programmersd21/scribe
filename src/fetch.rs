@@ -154,8 +154,8 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
         _ = cancelled(cancel) => None,
     };
     let Some(crate_result) = crate_result else {
-        let _ = std::fs::remove_file(&direct);
-        return Err("cancelled".into());
+        let cleanup = cleanup_paths(&[&direct]);
+        return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
     };
     let path = match crate_result {
         Ok(p) if p.is_absolute() => p,
@@ -218,14 +218,15 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     };
 
     if cancel.load(Ordering::Relaxed) {
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_file(&direct);
-        return Err("cancelled".into());
+        let cleanup = cleanup_paths(&[&path, &direct]);
+        return Err(format!("cancelled{}", cleanup_suffix(cleanup)));
     }
     // the crate may have written to `direct` even when it reported another
     // path; keep only the file we actually return.
     if direct != path {
-        let _ = std::fs::remove_file(&direct);
+        cleanup_paths(&[&direct]).map_err(|error| {
+            format!("audio was downloaded but temporary-file cleanup failed: {error}")
+        })?;
     }
 
     Ok(FetchedAudio {
@@ -273,9 +274,9 @@ pub fn ffmpeg_path() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-fn cleanup_fallback(fallback: &Path, direct: &Path) -> Result<(), String> {
+fn cleanup_paths(paths: &[&Path]) -> Result<(), String> {
     let mut failures = Vec::new();
-    for path in [fallback, direct] {
+    for path in paths {
         match std::fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -287,6 +288,10 @@ fn cleanup_fallback(fallback: &Path, direct: &Path) -> Result<(), String> {
     } else {
         Err(format!("could not remove partial download(s): {}", failures.join("; ")))
     }
+}
+
+fn cleanup_fallback(fallback: &Path, direct: &Path) -> Result<(), String> {
+    cleanup_paths(&[fallback, direct])
 }
 
 fn cleanup_suffix(result: Result<(), String>) -> String {
