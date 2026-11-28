@@ -226,7 +226,9 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     }
     // the crate may have written to `direct` even when it reported another
     // path; keep only the file we actually return.
-    if direct != path && let Err(error) = cleanup_paths(&[&direct]) {
+    if direct != path
+        && let Err(error) = cleanup_paths(&[&direct])
+    {
         let returned_cleanup = cleanup_paths(&[&path]);
         let detail = match returned_cleanup {
             Ok(()) => error,
