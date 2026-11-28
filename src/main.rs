@@ -911,7 +911,11 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .find(|model| model.file == app.download_file)
                     .ok_or_else(|| "downloaded model is no longer in the catalog".to_string())
                     .and_then(remove_discarded_model);
-                if result.is_ok() && app.model_name.ends_with(&app.download_file) {
+                let discarded_path =
+                    model::cache_dir().join(&app.download_file).to_string_lossy().to_string();
+                if !model::cache_dir().join(&app.download_file).exists()
+                    && app.model_name == discarded_path
+                {
                     app.model_name.clear();
                     app.model_label = "-".into();
                 }
