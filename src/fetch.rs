@@ -150,7 +150,10 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     let direct = out.join(&name);
     let crate_result = tokio::select! {
         result = downloader.download_audio_stream(&video, &name) => result,
-        _ = cancelled(cancel) => return Err("cancelled".into()),
+        _ = cancelled(cancel) => {
+            let _ = std::fs::remove_file(&direct);
+            return Err("cancelled".into());
+        }
     };
     let path = match crate_result {
         Ok(p) if p.is_absolute() => p,
@@ -166,15 +169,9 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                 now_millis()
             ));
             let mut child = tokio::process::Command::new(&ytdlp)
-                .args([
-                    "--no-playlist",
-                    "--no-warnings",
-                    "-f",
-                    "bestaudio/best",
-                    "-o",
-                    fallback.to_str().unwrap_or("audio.webm"),
-                    url,
-                ])
+                .args(["--no-playlist", "--no-warnings", "-f", "bestaudio/best", "-o"])
+                .arg(&fallback)
+                .arg(url)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
