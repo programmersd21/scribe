@@ -886,10 +886,12 @@ fn change_setting(app: &mut App, forward: bool) {
     }
 }
 
-fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
+fn retry_cache_removal(
+    mut remove: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
     let mut last_error = String::new();
     for attempt in 0..5 {
-        match model::remove_model(info) {
+        match remove() {
             Ok(()) => return Ok(()),
             Err(error)
                 if error.contains("another scribe is using the model cache") && attempt < 4 =>
@@ -901,6 +903,14 @@ fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
         }
     }
     Err(last_error)
+}
+
+fn remove_discarded_model(info: &model::ModelInfo) -> Result<(), String> {
+    retry_cache_removal(|| model::remove_model(info))
+}
+
+fn remove_discarded_partial(info: &model::ModelInfo) -> Result<(), String> {
+    retry_cache_removal(|| model::remove_partial(info))
 }
 
 fn clear_discarded_model_selection(app: &mut App, file: &str) {
@@ -963,7 +973,7 @@ fn finish_model_download(app: &mut App, outcome: DownloadOutcome) {
                     .iter()
                     .find(|info| info.file == app.download_file)
                 {
-                    if let Err(err) = model::remove_partial(info) {
+                    if let Err(err) = remove_discarded_partial(info) {
                         app.download_info = err.clone();
                         app.set_message(err);
                     } else {
