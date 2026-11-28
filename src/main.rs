@@ -433,11 +433,12 @@ fn run_tui(args: &Args) -> Result<(), String> {
     if let Some(cancel) = download_cancel.take() {
         cancel.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    // restore the terminal before joining a downloader that may be waiting on
+    // a network read timeout after cancellation.
+    guard.restore();
     if let Some(h) = downloader.take() {
         let _ = h.join();
     }
-    // restore the terminal before waiting on a possibly slow worker window.
-    guard.restore();
     if let Some(h) = handle.take() {
         h.stop();
     }
