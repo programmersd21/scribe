@@ -65,6 +65,7 @@ pub enum EventKind {
     Segment(Segment),
     Done,
     Cancelled,
+    CancelledWithWarning(String),
     Error(String),
 }
 
@@ -221,6 +222,8 @@ fn run(
     reap(children);
     let last = match result {
         Err(_) => EventKind::Error("the worker panicked. the job was abandoned; try again".into()),
+        Ok(Err(e)) if cancel.load(Ordering::Relaxed) && e == "cancelled" => EventKind::Cancelled,
+        Ok(Err(e)) if cancel.load(Ordering::Relaxed) => EventKind::CancelledWithWarning(e),
         Ok(_) if cancel.load(Ordering::Relaxed) => EventKind::Cancelled,
         Ok(Ok(())) => EventKind::Done,
         Ok(Err(e)) => EventKind::Error(e),
@@ -991,7 +994,7 @@ mod tests {
             match rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(Event {
                     job_id: 7,
-                    kind: EventKind::Error(_) | EventKind::Cancelled | EventKind::Done,
+                    kind: EventKind::Error(_) | EventKind::Cancelled | EventKind::CancelledWithWarning(_) | EventKind::Done,
                 }) => {
                     terminal = true;
                     break;
