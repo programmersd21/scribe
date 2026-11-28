@@ -342,6 +342,25 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn cache_status_accepts_symlinked_directory_ancestors() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!("scribe-doctor-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("target")).unwrap();
+        symlink(dir.join("target"), dir.join("linked")).unwrap();
+        let cache = dir.join("linked").join("nested").join("models");
+        assert_eq!(
+            cache_status(&cache),
+            (
+                Verdict::Warn,
+                "will be created on first download; write access not tested"
+            )
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn cache_status_accepts_missing_parent_trees() {
         let dir = std::env::temp_dir().join(format!("scribe-doctor-nested-{}", std::process::id()));
