@@ -1315,7 +1315,8 @@ mod tests {
     fn discard_clears_symlinked_managed_model_selection() {
         use std::os::unix::fs::symlink;
         let info = crate::model::find("tiny").unwrap();
-        let dir = std::env::temp_dir().join(format!("scribe-symlink-discard-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("scribe-symlink-discard-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         crate::model::set_test_cache_dir(Some(dir.clone()));
