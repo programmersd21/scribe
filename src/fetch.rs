@@ -170,7 +170,7 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                 std::process::id(),
                 unique_suffix()
             ));
-            let mut child = tokio::process::Command::new(&ytdlp)
+            let mut child = match tokio::process::Command::new(&ytdlp)
                 .args([
                     "--no-playlist",
                     "--no-warnings",
