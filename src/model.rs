@@ -495,6 +495,16 @@ pub fn validate_cached(info: &ModelInfo, path: &Path) -> Result<(), String> {
 
 /// custom models have no authoritative checksum in the catalog. the least we
 /// can do is reject empty stubs and files that cannot possibly be ggml models.
+fn read_model_header(path: &Path) -> Result<[u8; 4], String> {
+    use std::io::Read;
+    let mut file =
+        File::open(path).map_err(|e| format!("cannot read model {}: {e}", path.display()))?;
+    let mut magic = [0u8; 4];
+    file.read_exact(&mut magic)
+        .map_err(|e| format!("cannot read model header {}: {e}", path.display()))?;
+    Ok(magic)
+}
+
 pub fn validate_custom(path: &Path) -> Result<(), String> {
     let len = fs::metadata(path)
         .map_err(|e| format!("cannot inspect {}: {e}", path.display()))?
@@ -506,13 +516,8 @@ pub fn validate_custom(path: &Path) -> Result<(), String> {
             len
         ));
     }
-    let mut magic = [0u8; 4];
-    use std::io::Read;
-    if let Ok(mut file) = File::open(path)
-        && file.read_exact(&mut magic).is_ok()
-        && &magic != b"ggml"
-        && &magic != b"GGUF"
-    {
+    let magic = read_model_header(path)?;
+    if &magic != b"ggml" && &magic != b"GGUF" {
         return Err(format!(
             "{} does not look like a ggml model (bad header). refusing to hand it to whisper",
             path.display()
@@ -1375,6 +1380,16 @@ mod tests {
         assert!(DownloadLock::acquire(&dir, file).is_err());
         assert!(lock_path.is_dir());
         assert!(!dir.join(format!(".{file}.lock")).exists());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn custom_model_header_read_errors_are_rejected() {
+        let dir = std::env::temp_dir().join(format!("scribe-header-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("truncated.bin");
+        fs::write(&path, b"gg").unwrap();
+        assert!(read_model_header(&path).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 
