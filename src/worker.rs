@@ -530,7 +530,7 @@ fn spawn_ingest(
                 };
                 let samples = bytes_to_f32(&bytes[..n - n % 4]);
                 total += samples.len();
-                if !send_chunk(&tx, Chunk::Samples(samples), &cancel) {
+                if !send_chunk(&tx, Chunk::Samples(samples), &reader_cancel) {
                     return total;
                 }
                 if n < bytes.len() {
