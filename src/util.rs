@@ -301,25 +301,45 @@ pub fn home_dir() -> Option<PathBuf> {
 /// expand `~` ourselves. the shell is not involved when a user pastes a path
 /// into a text box, so somebody has to do it.
 fn tilde_suffix(path: &str, windows: bool) -> Option<&str> {
-    path.strip_prefix("~/").or_else(|| {
-        if windows {
-            path.strip_prefix("~\\")
-        } else {
-            None
+    if windows {
+        let rest = path.strip_prefix('~')?;
+        if !rest.starts_with('/') && !rest.starts_with('\\') {
+            return None;
         }
-    })
+        Some(rest.trim_start_matches(['/', '\\']))
+    } else {
+        path.strip_prefix("~/")
+            .map(|rest| rest.trim_start_matches('/'))
+    }
+}
+
+fn with_trailing_separator(home: PathBuf) -> PathBuf {
+    let mut value = home.into_os_string();
+    let text = value.to_string_lossy();
+    if !text.ends_with('/') && !text.ends_with('\\') {
+        value.push(std::path::MAIN_SEPARATOR.to_string());
+    }
+    PathBuf::from(value)
+}
+
+fn expand_tilde_from(path: &str, home: Option<PathBuf>, windows: bool) -> PathBuf {
+    if path == "~" {
+        return home.unwrap_or_else(|| PathBuf::from("~"));
+    }
+    if let Some(rest) = tilde_suffix(path, windows)
+        && let Some(home) = home
+    {
+        return if rest.is_empty() {
+            with_trailing_separator(home)
+        } else {
+            home.join(rest)
+        };
+    }
+    PathBuf::from(path)
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {
-    if path == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from("~"));
-    }
-    if let Some(rest) = tilde_suffix(path, cfg!(windows))
-        && let Some(home) = home_dir()
-    {
-        return home.join(rest);
-    }
-    PathBuf::from(path)
+    expand_tilde_from(path, home_dir(), cfg!(windows))
 }
 
 /// one path suggestion, with everything the UI needs to render and rank it.
@@ -767,7 +787,19 @@ mod tests {
     fn tilde_paths_accept_native_windows_separators() {
         assert_eq!(tilde_suffix("~/Documents", false), Some("Documents"));
         assert_eq!(tilde_suffix("~\\Documents", true), Some("Documents"));
+        assert_eq!(tilde_suffix("~\\\\Documents", true), Some("Documents"));
+        assert_eq!(tilde_suffix("~\\", true), Some(""));
         assert_eq!(tilde_suffix("~\\Documents", false), None);
+    }
+
+    #[test]
+    fn tilde_root_keeps_a_trailing_separator_for_completion() {
+        let home = PathBuf::from("C:\\Users\\person");
+        let expanded = expand_tilde_from("~\\", Some(home), true);
+        assert_eq!(expanded.to_string_lossy(), "C:\\Users\\person\\");
+        let (dir, prefix) = split_completion_path(&expanded.to_string_lossy(), true);
+        assert_eq!(dir, "C:\\Users\\person\\");
+        assert_eq!(prefix, "");
     }
 
     #[test]
