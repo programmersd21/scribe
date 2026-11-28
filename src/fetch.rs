@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::process::Child;
 
@@ -146,14 +147,15 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     }
 
     // unique name so two runs cannot fight over the same file.
-    let name = format!("scribe-{}-{}.m4a", std::process::id(), now_millis());
+    let name = format!("scribe-{}-{}.m4a", std::process::id(), unique_suffix());
     let direct = out.join(&name);
     let crate_result = tokio::select! {
-        result = downloader.download_audio_stream(&video, &name) => result,
-        _ = cancelled(cancel) => {
-            let _ = std::fs::remove_file(&direct);
-            return Err("cancelled".into());
-        }
+        result = downloader.download_audio_stream(&video, &name) => Some(result),
+        _ = cancelled(cancel) => None,
+    };
+    let Some(crate_result) = crate_result else {
+        let _ = std::fs::remove_file(&direct);
+        return Err("cancelled".into());
     };
     let path = match crate_result {
         Ok(p) if p.is_absolute() => p,
@@ -166,7 +168,7 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
             let fallback = out.join(format!(
                 "scribe-{}-{}.webm",
                 std::process::id(),
-                now_millis()
+                unique_suffix()
             ));
             let mut child = tokio::process::Command::new(&ytdlp)
                 .args([
@@ -188,6 +190,7 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
                 _ = cancelled(cancel) => {
                     stop_child(&mut child).await;
                     let _ = std::fs::remove_file(&fallback);
+                    let _ = std::fs::remove_file(&direct);
                     return Err("cancelled".into());
                 }
             };
@@ -221,11 +224,14 @@ async fn fetch_async(url: &str, cancel: &Arc<AtomicBool>) -> Result<FetchedAudio
     })
 }
 
-fn now_millis() -> u128 {
-    std::time::SystemTime::now()
+fn unique_suffix() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let sequence = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{timestamp}-{sequence}")
 }
 
 /// have the managed tools been installed yet? used for the startup hint.
