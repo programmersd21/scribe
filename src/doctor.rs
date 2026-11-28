@@ -329,7 +329,7 @@ mod tests {
         std::fs::write(&cache, b"not a directory").unwrap();
         assert_eq!(
             cache_status(&cache),
-            (Verdict::Fail, "path exists but is not a directory")
+            (Verdict::Fail, "path exists but is not a usable directory")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
